@@ -1,7 +1,6 @@
 """Build part tasks and per-video dependent merge tasks without UI state."""
 import hashlib
 import re
-import uuid
 from collections import OrderedDict
 
 from utils.removeSpecialChars import removeSpecialChars
@@ -12,7 +11,6 @@ def build_download_tasks(pages, options, merge_videos=(), merge_mode="auto"):
     if layout not in ("per_video", "shared"):
         raise ValueError("未知的存放方式")
     delete_after_merge = bool(options.get("delete_after_merge", True))
-    batch_id = uuid.uuid4().hex
     groups = OrderedDict()
     tasks = []
     for page in pages:
@@ -32,10 +30,8 @@ def build_download_tasks(pages, options, merge_videos=(), merge_mode="auto"):
                      "saveDanmaku": page.get("saveDanmaku", False),
                      "onlyAudio": page.get("onlyAudio", False)})
         groups.setdefault(key, []).append(part)
-    for video_order, (key, parts) in enumerate(groups.items()):
+    for key, parts in groups.items():
         parts.sort(key=lambda part: part["page"])
-        for part in parts:
-            part.update({"batch_id": batch_id, "video_order": video_order})
         tasks.extend(parts)
         if key not in merge_videos or len(parts) < 2:
             continue
@@ -52,6 +48,5 @@ def build_download_tasks(pages, options, merge_videos=(), merge_mode="auto"):
                       "directory": parts[0]["directory"],
                       "name": parts[0]["title"] + "__" + name if layout == "shared" else name,
                       "video_key": key, "dependencies": parts, "merge_mode": merge_mode,
-                      "batch_id": batch_id, "video_order": video_order,
                       "delete_after_merge": delete_after_merge})
     return tasks

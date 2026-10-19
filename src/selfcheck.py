@@ -17,6 +17,7 @@ def main(arguments):
     parser.add_argument("--folder-layout", choices=("per_video", "shared"), default="per_video")
     parser.add_argument("--keep-parts", action="store_true")
     parser.add_argument("--merge-next-video", action="store_true")
+    parser.add_argument("--download-slots", type=int, choices=range(1, 17), default=4)
     args = parser.parse_args(arguments)
     report_path = Path(args.report).resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +108,8 @@ def main(arguments):
         if args.download:
             Path(options["path"]).mkdir(parents=True, exist_ok=True)
             queue = window.ui.widget_download
-            queue.max_thread_count = 1
+            queue.max_thread_count = args.download_slots
+            report["download_slots"] = args.download_slots
             # Exercise the real settings page and Submit handler as well as
             # the download/merge scheduler, rather than injecting queue jobs.
             config = input_widget.input_pages[3]
@@ -168,12 +170,33 @@ def main(arguments):
                     assert len(merge["cleanup_result"]["deleted"]) == len(merge["dependencies"])
             if second:
                 first_merge = next(task for task in merges if task["video_key"] == first["key"])
-                next_start = min(task["started_at"] for task in tasks
-                                 if task["kind"] == "part" and task["video_key"] == second["key"])
-                assert first_merge["finished_at"] <= next_start
-                if not args.keep_parts:
-                    assert first_merge["cleanup_finished_at"] <= next_start
-                report["per_video_pipeline"] = "passed"
+                parts = [task for task in tasks if task["kind"] == "part"]
+                def overlap(left, right):
+                    return max(0.0, min(left["finished_at"], right["finished_at"])
+                               - max(left["started_at"], right["started_at"]))
+                merge_download_overlap = max(overlap(merge, part) for merge in merges for part in parts)
+                cross_video_overlap = max(overlap(left, right) for left in parts for right in parts
+                                          if left["video_key"] != right["video_key"])
+                events = sorted((task[key], delta, task["kind"] == "merge") for task in tasks
+                                for key, delta in (("started_at", 1), ("finished_at", -1)))
+                running = [0, 0]
+                peak = [0, 0]
+                for _time, delta, merge_event in events:
+                    running[merge_event] += delta
+                    peak[merge_event] = max(peak[merge_event], running[merge_event])
+                assert peak[0] <= args.download_slots
+                assert peak[1] == 1
+                if args.download_slots == 1:
+                    # The next part must run while the preceding video merges.
+                    assert merge_download_overlap > 0
+                if args.download_slots >= 3:
+                    assert cross_video_overlap > 0
+                report["independent_queues"] = {
+                    "passed": True, "peak_downloads": peak[0], "peak_merges": peak[1],
+                    "merge_download_overlap_seconds": merge_download_overlap,
+                    "cross_video_download_overlap_seconds": cross_video_overlap,
+                    "first_merge_started_before_all_downloads_finished":
+                        first_merge["started_at"] < max(part["finished_at"] for part in parts)}
             report["full_decode"] = "passed"
         report["ok"] = True
     except Exception:

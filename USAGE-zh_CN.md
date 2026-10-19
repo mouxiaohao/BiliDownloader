@@ -1,4 +1,4 @@
-# BiliDownloader 1.5.1：播放列表与分P
+# BiliDownloader 1.5.2：播放列表与分P
 
 将便携包完整解压，双击 `BiliDownloader/BiliDownloader.exe`。无需另装 Python 或 FFmpeg；请保留同目录的 `_internal`、`ffmpeg` 文件夹。
 
@@ -9,7 +9,7 @@
 5. “所选视频均合并分P”可以批量设置，但每个视频仍单独生成合并文件。默认优先无损合并；参数不一致时自动转为 H.264/AAC。也可选择仅无损模式，不兼容时提示并保留源文件。
 6. 在树形选择页下方设置“存放方式”：每个视频单独一个文件夹，或者所有视频直接放在同一个所选文件夹。统一存放时，文件名包含视频名称和BV号，防止同名分P覆盖。
 7. “合并成功后删除参与合并的分P”默认勾选；取消勾选即可保留原分P。这只清理本次参与成功合并的视频文件，独立音频、弹幕及未选中的分P保留。发生变化、被占用或仍供其他任务使用的文件会保留并提示。
-8. 下一步设置画质、编码和目录后提交。启用合并的视频按集处理：本视频全部所选分P下载成功 → 合并并校验 → 按设置清理 → 开始同批次后续视频。无需等待整个播放列表下载完成。失败/暂停的视频保留分P供重试，后续视频可以继续。
+8. 下一步设置画质、编码和目录后提交。下载按设置中的“最大下载线程数”并发进行，一个分P任务结束即补入下一个，不受视频边界限制。每个视频所选分P全部下载成功后，独立的合并队列即可合并、校验并按设置清理；合并不占下载名额，也不阻塞下载补位。哪个视频先下载齐就可先合并，无需等前一集或整个列表。合并队列同时处理一项，下载与合并各自可以暂停、重试。
 
 从视频地址进入并识别出合集时，默认只勾选当前视频；直接输入列表地址时默认全选列表。所有操作都需提交才会开始下载。
 
@@ -25,12 +25,12 @@ python -m venv .venv
 .venv\Scripts\python.exe tools\build_windows.py
 ```
 
-构建脚本会编译 Qt 界面，运行测试，打包独立程序，并生成 ZIP、SHA-256 与 `build-manifest.json`。程序位于 `delivery/1.5.1/BiliDownloader/`，按版本分目录，保留旧版。构建目录含有个人配置或下载数据时会拒绝覆盖。缺少 FFmpeg/ffprobe 时从 Gyan 下载并核验 SHA-256，依赖不需要安装到系统目录。
+构建脚本会编译 Qt 界面，运行测试，打包独立程序，并生成 ZIP、SHA-256 与 `build-manifest.json`。程序位于 `delivery/1.5.2/BiliDownloader/`，按版本分目录，保留旧版。构建目录含有个人配置或下载数据时会拒绝覆盖。缺少 FFmpeg/ffprobe 时从 Gyan 下载并核验 SHA-256，依赖不需要安装到系统目录。
 
 显式运行联网验证（配置及下载位于报告旁的隔离目录，不读取个人登录信息；仅抽样下载，不下载整个列表）：
 
 ```powershell
-.venv\Scripts\python.exe src\main.py --self-check --url 'https://space.bilibili.com/3493275574995772/lists/8530021?type=season' --folder-layout shared --merge-next-video --report '.validation\live.json' --download
+.venv\Scripts\python.exe src\main.py --self-check --url 'https://space.bilibili.com/3493275574995772/lists/8530021?type=season' --folder-layout shared --merge-next-video --download-slots 4 --report '.validation\live.json' --download
 ```
 
-这会各下载前两个视频的两个分P，验证逐集合并、清理完成后再进入下一集，以及最终文件整段解码。`--folder-layout per_video` 验证独立文件夹，`--keep-parts` 验证保留分P；不加 `--download` 则只检查解析和界面。便携版同样支持这些验证参数。
+这会各下载前两个视频的两个分P，记录下载与合并的实际起止时间、各队列并发峰值及重叠时长，并对合并结果整段解码。`--download-slots` 默认4，设为1可验证单个下载名额与合并任务仍能并行；设为4验证跨视频并发下载。`--folder-layout per_video` 验证独立文件夹，`--keep-parts` 验证保留分P；不加 `--download` 则只检查解析和界面。便携版同样支持这些验证参数。

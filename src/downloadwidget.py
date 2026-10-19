@@ -305,8 +305,8 @@ class DownloadWidget(QtWidgets.QWidget):
         if not self.tasks:
             return
         active_keys = set().union(*(self._task_keys(task) for task in self.running_tasks))
-        # A ready merge has priority and its own worker slot. It must not wait
-        # behind an entire playlist's remaining downloads.
+        # Merges have their own worker slot. Downloads fill their configured
+        # slots below, independently of video boundaries and merge progress.
         merge_running = any(task.get("kind") == "merge" for task in self.running_tasks)
         for index in range(len(self.tasks) - 1, -1, -1):
             task = self.tasks[index]
@@ -325,7 +325,7 @@ class DownloadWidget(QtWidgets.QWidget):
             candidate = None
             for index in range(len(self.tasks) - 1, -1, -1):
                 task = self.tasks[index]
-                if task.get("kind") == "merge" or self._download_is_blocked(task):
+                if task.get("kind") == "merge":
                     continue
                 if not self._task_keys(task) & active_keys:
                     candidate = index
@@ -335,18 +335,3 @@ class DownloadWidget(QtWidgets.QWidget):
             task = self.tasks.pop(candidate)
             self._start_task(task)
             active_keys.update(self._task_keys(task))
-
-    def _download_is_blocked(self, task):
-        if not task.get("batch_id"):
-            return False
-        for earlier in self.all_tasks:
-            if (earlier.get("kind") != "merge" or earlier.get("batch_id") != task["batch_id"]
-                    or earlier.get("video_order", 0) >= task.get("video_order", 0)
-                    or earlier.get("state") in ("completed", "failed", "paused")):
-                continue
-            # Failed/paused videos keep their parts for retry while later
-            # videos can still make progress.
-            if any(part.get("state") in ("failed", "paused") for part in earlier["dependencies"]):
-                continue
-            return True
-        return False

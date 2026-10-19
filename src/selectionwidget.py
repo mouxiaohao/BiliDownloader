@@ -16,7 +16,7 @@ class SelectionWidget(QtWidgets.QWidget):
         self._building = False
         self.ui = SimpleNamespace()
         layout = QtWidgets.QVBoxLayout(self)
-        hint = QtWidgets.QLabel("勾选列表或视频可选择其全部分P，也可展开后逐P勾选。\n启用合并后按视频依次完成：下载 → 合并 → 按设置清理分P。")
+        hint = QtWidgets.QLabel("勾选列表或视频可选择其全部分P，也可展开后逐P勾选。\n下载按设置的任务数并发进行；合并队列独立运行，各视频所选分P下载齐后即可合并。")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         toolbar = QtWidgets.QHBoxLayout()

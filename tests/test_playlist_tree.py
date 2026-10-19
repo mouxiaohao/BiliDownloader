@@ -250,7 +250,7 @@ def test_ready_merge_has_priority_with_full_download_slots(app, monkeypatch, tmp
     widget.close()
 
 
-def test_next_video_waits_for_current_video_merge(app, monkeypatch, tmp_path):
+def test_downloads_continue_while_merge_runs_and_next_merge_waits(app, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     widget = DownloadWidget(None)
     widget.timer.stop()
@@ -264,13 +264,104 @@ def test_next_video_waits_for_current_video_merge(app, monkeypatch, tmp_path):
         widget.running_tasks.append(task)
         started.append(task)
     monkeypatch.setattr(widget, "_start_task", start)
-    first_merge = next(task for task in tasks if task["kind"] == "merge")
-    for expected in [*first_merge["dependencies"], first_merge]:
+    first_merge, second_merge = [task for task in tasks if task["kind"] == "merge"]
+    for expected in first_merge["dependencies"]:
         widget.timer_timeout()
         assert started[-1] is expected
-        assert all(task["video_key"] == BV1 for task in started)
         expected["state"] = "completed"
         widget.running_tasks.remove(expected)
     widget.timer_timeout()
-    assert started[-1]["video_key"] == BV2
+    assert widget.running_tasks == [first_merge, second_merge["dependencies"][0]]
+    # Keep the first merge running while every remaining download finishes.
+    for part in second_merge["dependencies"]:
+        assert widget.running_tasks == [first_merge, part]
+        part["state"] = "completed"
+        widget.running_tasks.remove(part)
+        widget.timer_timeout()
+    assert widget.running_tasks == [first_merge]
+    assert widget.tasks == [second_merge]
+    first_merge["state"] = "completed"
+    widget.running_tasks.remove(first_merge)
+    widget.timer_timeout()
+    assert widget.running_tasks == [second_merge]
+    widget.close()
+
+
+@pytest.mark.parametrize("slots", [1, 2, 4])
+def test_download_slots_fill_across_video_boundaries(app, monkeypatch, tmp_path, slots):
+    monkeypatch.chdir(tmp_path)
+    widget = DownloadWidget(None)
+    widget.timer.stop()
+    tasks = scheduler_plan(tmp_path)
+    widget.all_tasks = tasks
+    widget.tasks = list(reversed(tasks))
+    widget.max_thread_count = slots
+    def start(task):
+        task["state"] = "running"
+        widget.running_tasks.append(task)
+    monkeypatch.setattr(widget, "_start_task", start)
+    parts = [task for task in tasks if task["kind"] == "part"]
+    widget.timer_timeout()
+    assert widget.running_tasks == parts[:slots]
+    # As soon as a slot frees, start the next part even if earlier parts of
+    # the preceding video are still downloading and its merge is not ready.
+    completed = widget.running_tasks.pop(0)
+    completed["state"] = "completed"
+    widget.timer_timeout()
+    assert widget.running_tasks == parts[1:slots + 1]
+    assert len(widget.running_tasks) == slots
+    if slots >= 2:
+        if slots == 2:
+            # Finish A's third part first while its second part stays active.
+            widget.running_tasks.remove(parts[2])
+            parts[2]["state"] = "completed"
+            widget.timer_timeout()
+        assert {task["video_key"] for task in widget.running_tasks} == {BV1, BV2}
+        assert any(part["state"] == "running" for part in parts if part["video_key"] == BV1)
+    widget.close()
+
+
+@pytest.mark.parametrize("state", ["queued", "paused", "failed"])
+def test_waiting_paused_or_failed_video_does_not_block_other_downloads(app, monkeypatch, tmp_path, state):
+    monkeypatch.chdir(tmp_path)
+    widget = DownloadWidget(None)
+    widget.timer.stop()
+    tasks = scheduler_plan(tmp_path)
+    widget.all_tasks = tasks
+    first_merge, second_merge = [task for task in tasks if task["kind"] == "merge"]
+    first_merge["state"] = state
+    first_merge["dependencies"][0]["state"] = "paused"
+    # The earlier merge is either waiting on a paused input, paused itself,
+    # or failed. None of these states may hold back an unrelated video.
+    pending = [first_merge] if state == "queued" else []
+    widget.tasks = list(reversed(pending + second_merge["dependencies"]))
+    widget.max_thread_count = 2
+    def start(task):
+        task["state"] = "running"
+        widget.running_tasks.append(task)
+    monkeypatch.setattr(widget, "_start_task", start)
+    widget.timer_timeout()
+    assert widget.running_tasks == second_merge["dependencies"]
+    widget.close()
+
+
+def test_later_video_can_merge_before_earlier_video_is_ready(app, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    widget = DownloadWidget(None)
+    widget.timer.stop()
+    tasks = scheduler_plan(tmp_path)
+    widget.all_tasks = tasks
+    first_merge, second_merge = [task for task in tasks if task["kind"] == "merge"]
+    for part in second_merge["dependencies"]:
+        part["state"] = "completed"
+    widget.tasks = [second_merge, first_merge]
+    widget.max_thread_count = 1
+    widget.running_tasks = [first_merge["dependencies"][0]]
+    def start(task):
+        task["state"] = "running"
+        widget.running_tasks.append(task)
+    monkeypatch.setattr(widget, "_start_task", start)
+    widget.timer_timeout()
+    assert widget.running_tasks == [first_merge["dependencies"][0], second_merge]
+    assert widget.tasks == [first_merge]
     widget.close()
