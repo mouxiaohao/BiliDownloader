@@ -71,6 +71,7 @@ def main():
         shutil.copy2(ROOT / name, application / name)
     notices = application / "third-party-licenses"
     notices.mkdir(exist_ok=True)
+    shutil.copytree(ROOT / "licenses", notices / "Qt", dirs_exist_ok=True)
     shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", notices / "README.md")
     for license_file in (ROOT / ".build-tools/ffmpeg-release").glob("*/LICENSE"):
         shutil.copy2(license_file, notices / "FFmpeg-LICENSE.txt")

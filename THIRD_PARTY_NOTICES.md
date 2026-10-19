@@ -6,4 +6,6 @@ The portable package includes separately executed FFmpeg and ffprobe binaries fr
 
 PySide6/Qt and Shiboken are dynamically loaded components under their respective LGPL/GPL/commercial terms. Their notices are preserved where included in the installed wheels; source and licensing information: https://www.qt.io/licensing/open-source-lgpl-obligations and https://code.qt.io/pyside/pyside-setup.git/ . Qt libraries remain separate in _internal so a compatible replacement can be supplied.
 
+The included Qt GPLv3 and LGPLv3 texts are from Qt 6.7.3: https://github.com/qt/qtbase/tree/v6.7.3/LICENSES .
+
 Other dependencies include Python (PSF license), PyInstaller (GPL with the bootloader exception), Pillow (HPND), qrcode (BSD), PyCryptodome (BSD/public-domain components), Brotli and Zstandard (their accompanying permissive licenses), pyperclip (BSD), and pywin32 (PSF). The application includes the HarmonyOS Sans SC font from the upstream project.
