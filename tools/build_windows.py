@@ -5,6 +5,7 @@ or system Python/FFmpeg installation is needed by the finished application.
 """
 import argparse
 import hashlib
+from importlib import metadata
 import json
 from pathlib import Path
 import shutil
@@ -79,6 +80,21 @@ def main():
     for version_file in (ROOT / ".venv/Lib/site-packages").glob("PySide6*/**/LICENSE*"):
         if version_file.is_file():
             shutil.copy2(version_file, notices / (version_file.parent.name + "-" + version_file.name))
+    for package in ("PySide6", "PySide6_Essentials", "PySide6_Addons", "shiboken6", "Pillow",
+                    "qrcode", "pycryptodome", "brotli", "zstandard", "pyperclip", "pywin32", "pyinstaller"):
+        distribution = metadata.distribution(package)
+        for item in distribution.files or []:
+            if not (any(part.lower() in ("license", "licenses") for part in item.parts)
+                    or item.name.lower().startswith(("license", "copying", "notice"))):
+                continue
+            source = Path(distribution.locate_file(item))
+            if source.is_file():
+                package_dir = notices / package
+                package_dir.mkdir(exist_ok=True)
+                shutil.copy2(source, package_dir / item.name)
+    for name in ("LICENSE.txt", "LICENSE"):
+        if (Path(sys.base_prefix) / name).is_file():
+            shutil.copy2(Path(sys.base_prefix) / name, notices / "Python-LICENSE.txt")
     sys.path.insert(0, str(ROOT / "src"))
     from utils.version import __version__
     revision = command(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
