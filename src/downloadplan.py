@@ -1,5 +1,4 @@
 """Build part tasks and per-video dependent merge tasks without UI state."""
-import hashlib
 import re
 from collections import OrderedDict
 
@@ -39,14 +38,9 @@ def build_download_tasks(pages, options, merge_videos=(), merge_mode="auto"):
             raise ValueError("合并分P的视频不能选择“仅下载音频”")
         for part in parts:
             part["delete_after_merge"] = delete_after_merge
-        numbers = "_".join("{:03d}".format(part["page"]) for part in parts)
-        if len(numbers) > 60:
-            digest = hashlib.sha256(numbers.encode("ascii")).hexdigest()[:8]
-            numbers = "{:03d}-{:03d}_{}P_{}".format(parts[0]["page"], parts[-1]["page"], len(parts), digest)
-        name = "合并分P_" + numbers
         tasks.append({"kind": "merge", "path": parts[0]["path"], "title": parts[0]["title"],
                       "directory": parts[0]["directory"],
-                      "name": parts[0]["title"] + "__" + name if layout == "shared" else name,
+                      "name": parts[0]["title"],
                       "video_key": key, "dependencies": parts, "merge_mode": merge_mode,
                       "delete_after_merge": delete_after_merge})
     return tasks

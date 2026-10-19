@@ -176,6 +176,7 @@ def test_output_layout_avoids_collisions_and_cleanup_is_explicit(layout, delete,
     assert len({str(task_file(task)) for task in tasks}) == len(tasks)
     merges = [task for task in tasks if task["kind"] == "merge"]
     assert len(merges) == 2 and all(task["delete_after_merge"] == delete for task in merges)
+    assert all(task_file(task).name == task["title"] + ".mp4" for task in merges)
     if layout == "shared":
         assert {task_directory(task) for task in tasks} == {tmp_path}
         assert all(task["video_key"] in task["name"] for task in tasks)

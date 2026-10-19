@@ -138,6 +138,8 @@ def main(arguments):
             tasks = list(queue.all_tasks)
             merges = [task for task in tasks if task["kind"] == "merge"]
             assert len(merges) == len(expected_merges)
+            assert all(task_file(task).name == task["title"] + ".mp4" for task in merges)
+            report["merged_filename_uses_video_title"] = True
             report["submission_via_config_ui"] = True
             deadline = time.monotonic() + 480
             while any(task["state"] not in ("completed", "failed") for task in tasks):

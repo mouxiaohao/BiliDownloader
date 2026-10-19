@@ -56,7 +56,7 @@ class SelectionWidget(QtWidgets.QWidget):
         self.output_layout = QtWidgets.QComboBox()
         self.output_layout.addItem("每个视频单独一个文件夹", "per_video")
         self.output_layout.addItem("所有视频放在同一个所选文件夹", "shared")
-        self.output_layout.setToolTip("统一存放时，文件名包含视频名称和BV号，防止不同视频的同名分P互相覆盖。")
+        self.output_layout.setToolTip("合并成片以视频标题（与视频文件夹同名，含BV号）命名。统一存放的未合并分P另带P号，防止覆盖。")
         self.output_layout.currentIndexChanged.connect(self.update_selection)
         storage.addWidget(self.output_layout)
         self.delete_parts = QtWidgets.QCheckBox("合并成功后删除参与合并的分P")
