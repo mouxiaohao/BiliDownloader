@@ -17,6 +17,7 @@ def main(arguments):
     parser.add_argument("--folder-layout", choices=("per_video", "shared"), default="per_video")
     parser.add_argument("--keep-parts", action="store_true")
     parser.add_argument("--merge-next-video", action="store_true")
+    parser.add_argument("--part-numbers", type=int, nargs="+", default=[1, 2])
     parser.add_argument("--download-slots", type=int, choices=range(1, 17), default=4)
     args = parser.parse_args(arguments)
     report_path = Path(args.report).resolve()
@@ -67,8 +68,11 @@ def main(arguments):
         selection.select_all(False)
         assert not selection.ui.button_next.isEnabled()
         first = next((group for group in selection.data["videos"] if group.get("current")), selection.data["videos"][0])
+        report["current_video_title"] = first["title"]
         assert len(first["pages"]) >= 2, "测试视频至少需要两个分P"
-        for page in first["pages"][:2]:
+        first_parts = [page for page in first["pages"] if page["page"] in args.part_numbers]
+        assert len(first_parts) >= 2 and len(first_parts) == len(set(args.part_numbers)), "测试合并需要至少两个有效P号"
+        for page in first_parts:
             page["tree_item"].setCheckState(0, QtCore.Qt.CheckState.Checked)
         selection.merge_boxes[first["key"]].setChecked(True)
         second = next((group for group in selection.data["videos"] if group["key"] != first["key"] and group["pages"]), None)
@@ -93,7 +97,10 @@ def main(arguments):
                                     "name": task["name"]} for task in tasks]
         merges = [task for task in tasks if task["kind"] == "merge"]
         assert len(merges) == len(expected_merges)
-        assert {part["video_key"] for part in merges[0]["dependencies"]} == {first["key"]}
+        assert {task["video_key"] for task in merges} == expected_merges
+        assert all({part["video_key"] for part in task["dependencies"]} == {task["video_key"]} for task in merges)
+        report["selected_part_numbers"] = [page["page"] for page in first_parts]
+        report["selected_original_part_names"] = [page["name"] for page in first_parts]
         input_widget.input_pages[0].hide()
         input_widget.ui.gridLayout.removeWidget(input_widget.input_pages[0])
         input_widget.ui.gridLayout.addWidget(selection, 0, 0, 1, 1)
@@ -154,7 +161,7 @@ def main(arguments):
                                        "state": task["state"], "name": task["name"],
                                        "started_at": task.get("started_at"), "finished_at": task.get("finished_at"),
                                        "source_deleted": task.get("source_deleted", False)} for task in tasks]
-            report["merge_result"] = merges[0]["merge_result"]
+            report["merge_result"] = next(task["merge_result"] for task in merges if task["video_key"] == first["key"])
             report["merge_results"] = [{"video_key": task["video_key"], "result": task["merge_result"],
                                         "cleanup": task.get("cleanup_result"),
                                         "cleanup_finished_at": task.get("cleanup_finished_at")} for task in merges]

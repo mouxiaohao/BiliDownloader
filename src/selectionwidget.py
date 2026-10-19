@@ -110,6 +110,7 @@ class SelectionWidget(QtWidgets.QWidget):
             if group.get("current"):
                 label += "  ← 当前视频"
             item = QtWidgets.QTreeWidgetItem(self.root, [label, ""])
+            item.setToolTip(0, label)
             self.video_items[group["key"]] = item
             if group.get("error"):
                 item.setText(0, label + "  解析失败")
@@ -120,6 +121,7 @@ class SelectionWidget(QtWidgets.QWidget):
             checked = self.data.get("default_all", True) or group.get("current")
             for page in group["pages"]:
                 part = QtWidgets.QTreeWidgetItem(item, ["P{:03d}  {}".format(page["page"], page["name"]), ""])
+                part.setToolTip(0, page["name"])
                 part.setFlags(part.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
                 part.setCheckState(0, QtCore.Qt.CheckState.Checked if checked else QtCore.Qt.CheckState.Unchecked)
                 page["tree_item"] = part

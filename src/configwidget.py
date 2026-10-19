@@ -68,7 +68,6 @@ class ConfigWidget(QtWidgets.QWidget):
         codec = video_codec_match[self.ui.combo_codec.currentText()]
         userdata = configUtils.UserDataHelper()
         reserveAudio = userdata.get(userdata.CFGS.RESERVE_AUDIO, False)
-        disable_title_limit = userdata.get(userdata.CFGS.DISABLE_TITLE_LENGTH_LIMIT, False)
         special_audio = None
         if self.ui.combo_audio.isEnabled():
             special_audio = self.ui.combo_audio.currentText()
@@ -95,7 +94,6 @@ class ConfigWidget(QtWidgets.QWidget):
                 "fnval": self.fnval,
                 "specialAudio": special_audio,
                 "aiLanguage": ai_language,
-                "disable_title_limit": disable_title_limit,
                 "output_layout": self.data.get("output_layout", "per_video"),
                 "delete_after_merge": self.data.get("delete_after_merge", True),
             }

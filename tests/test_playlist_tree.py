@@ -225,6 +225,19 @@ def scheduler_plan(tmp_path):
     return tasks
 
 
+def test_long_display_names_do_not_lengthen_temporary_filenames(app, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    widget = DownloadWidget(None)
+    widget.timer.stop()
+    title = "完整标题超过二十字后仍然保留全部内容和末尾集数" * 3
+    task = widget.push_task({"path": str(tmp_path), "title": title, "name": title + "__P010"})
+    assert len(task["tempName"]) == 37
+    assert title not in task["tempName"]
+    assert task["widget"].ui.label_title.toolTip() == title
+    assert task["widget"].ui.label_part.toolTip() == task["name"]
+    widget.close()
+
+
 def test_ready_merge_has_priority_with_full_download_slots(app, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     widget = DownloadWidget(None)

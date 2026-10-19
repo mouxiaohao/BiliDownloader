@@ -24,6 +24,8 @@ class DownloadItem(QtWidgets.QWidget):
         self.info = info
         self.ui.label_title.setText(info["title"])
         self.ui.label_part.setText(info["name"])
+        self.ui.label_title.setToolTip(info["title"])
+        self.ui.label_part.setToolTip(info["name"])
         self.set_task_state(info["state"])
 
     def _set_pause_icon(self, paused):

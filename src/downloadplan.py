@@ -1,5 +1,4 @@
 """Build part tasks and per-video dependent merge tasks without UI state."""
-import re
 from collections import OrderedDict
 
 from utils.removeSpecialChars import removeSpecialChars
@@ -15,8 +14,9 @@ def build_download_tasks(pages, options, merge_videos=(), merge_mode="auto"):
     for page in pages:
         key = str(page.get("video_key", page["id"]))
         def clean(value):
-            value = re.sub(r"[\x00-\x1f\x7f]", "_", str(value))
-            return removeSpecialChars(value, None if options.get("disable_title_limit") else 20).rstrip(" .") or "_"
+            # Old profiles may still contain the former 20-character option.
+            # Output names always retain the full video and part titles now.
+            return removeSpecialChars(str(value)).rstrip(" .") or "_"
         part = {key_: value for key_, value in options.items()
                 if key_ not in ("disable_title_limit", "output_layout", "delete_after_merge")}
         part.update({key_: page[key_] for key_ in ("id", "isbvid", "cid", "type")})

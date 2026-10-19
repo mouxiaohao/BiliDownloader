@@ -313,10 +313,10 @@
          <item row="8" column="0">
           <widget class="QLabel" name="label_19">
            <property name="toolTip">
-            <string>启用此选项可能存在隐患，可能导致程序崩溃或者造成其他更严重的影响。</string>
+            <string>视频标题和分P名称不再截断，特殊字符沿用下划线替换规则。</string>
            </property>
            <property name="text">
-            <string>解除文件名长度限制</string>
+            <string>文件命名</string>
            </property>
           </widget>
          </item>
@@ -413,12 +413,12 @@
           </widget>
          </item>
          <item row="8" column="1">
-          <widget class="QCheckBox" name="check_close_text_len_limit">
+          <widget class="QLabel" name="label_filename_policy">
            <property name="toolTip">
-            <string>启用此选项可能存在隐患，可能导致程序崩溃或者造成其他更严重的影响。</string>
+            <string>不再按20字符截断标题，旧版长度设置也不会截断新任务。</string>
            </property>
            <property name="text">
-            <string/>
+            <string>保留完整视频标题及分P名称</string>
            </property>
           </widget>
          </item>
@@ -490,7 +490,6 @@
   <tabstop>combo_style</tabstop>
   <tabstop>check_reserve_audio</tabstop>
   <tabstop>check_hiper</tabstop>
-  <tabstop>check_close_text_len_limit</tabstop>
   <tabstop>check_highdpi</tabstop>
   <tabstop>check_audio</tabstop>
   <tabstop>check_danmaku</tabstop>

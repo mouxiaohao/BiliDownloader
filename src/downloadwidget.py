@@ -52,7 +52,7 @@ class DownloadWidget(QtWidgets.QWidget):
         task["state"] = "queued"
         task["parent"] = self
         task["pending_action"] = None
-        task["tempName"] = "{}_{}".format(task["name"], uuid.uuid4().hex)
+        task["tempName"] = "bili_" + uuid.uuid4().hex
         task["widget"] = DownloadItem(self)
         item = QtWidgets.QListWidgetItem()
         item.setSizeHint(QtCore.QSize(0, 106))
