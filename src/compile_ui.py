@@ -7,6 +7,8 @@ from Crypto.Hash import SHA256
 
 
 def check_cache(cache, tgt, hashhex):
+    if not pathlib.Path(tgt).is_file():
+        return False
     if cache is None:
         return False
     if tgt in cache:
@@ -16,13 +18,11 @@ def check_cache(cache, tgt, hashhex):
 
 
 def check_env_path(d: pathlib.Path) -> None:
-    for p in sys.path:
-        if pathlib.Path(d) == pathlib.Path(p):
-            return
-    sys.path.append(str(d))
-    path = os.getenv("PATH")
-    path = str(d) + ';' + path
-    os.putenv("PATH", path)
+    if str(d) not in sys.path:
+        sys.path.append(str(d))
+    path = os.environ.get("PATH", "")
+    if str(d) not in path.split(os.pathsep):
+        os.environ["PATH"] = str(d) + os.pathsep + path
 
 
 def main():
@@ -60,7 +60,7 @@ def main():
                 if tgt in cache:
                     cache.pop(tgt)
             print(i + " => " + tgt)
-            subprocess.call(["pyside6-uic", "-a", i, "-o", tgt])
+            subprocess.check_call(["pyside6-uic", "-a", i, "-o", tgt])
         if i.endswith(".qrc"):
             with open(i, "rb") as fc:
                 hashhex = SHA256.new(fc.read()).hexdigest()
@@ -75,7 +75,7 @@ def main():
                 if tgt in cache:
                     cache.pop(tgt)
             print(i + " => " + tgt)
-            subprocess.call(["pyside6-rcc", i, "-o", tgt])
+            subprocess.check_call(["pyside6-rcc", i, "-o", tgt])
 
     if cache:
         for k, v in cache.items():

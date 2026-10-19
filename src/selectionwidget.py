@@ -1,127 +1,166 @@
 import pickle
+from collections import OrderedDict
+from types import SimpleNamespace
 
 from PySide6 import QtWidgets, QtCore
 
-from centralcheckbox import CentralCheckBox
-from ui_selectionwidget import Ui_SelectionWidget
-
-SELECTTON_HELP = """输入你要下载的区段：
-区段使用单集数字或 A-B 的格式指定头尾，使用英文逗号(,)分割多个区段。
-如果不输入内容点击设置选集则对全部选项进行反选操作。
-
-举例：
-假设你要下载第一P和第二P，你可以输入：1-2 或者输入 1, 2
-
-如果要下载第一P到第五P，但是不要第三P，你可以分成两个区段以规避3：1-2, 4-5
-
-最后，按下设置选集按钮完成设置。"""
-
 
 class SelectionWidget(QtWidgets.QWidget):
-    def __init__(self, parent: QtWidgets.QWidget = ...) -> None:
+    """Checkable playlist -> video -> part tree; merge stays inside each video."""
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.ui = Ui_SelectionWidget()
-        self.ui.setupUi(self)
-        self.meta = None
         self.data = None
-        self.ui.button_setSelection.clicked.connect(self.on_set_button_clicked)
-        self.ui.button_help.clicked.connect(self.on_help_button_clicked)
+        self.video_items = {}
+        self.merge_boxes = {}
+        self._building = False
+        self.ui = SimpleNamespace()
+        layout = QtWidgets.QVBoxLayout(self)
+        hint = QtWidgets.QLabel("勾选列表或视频可选择其全部分P，也可展开后逐P勾选。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        toolbar = QtWidgets.QHBoxLayout()
+        for title, handler in (("全选", lambda: self.select_all(True)),
+                               ("全不选", lambda: self.select_all(False)),
+                               ("只选当前视频", self.select_current)):
+            button = QtWidgets.QPushButton(title)
+            button.clicked.connect(handler)
+            toolbar.addWidget(button)
+            if title == "只选当前视频":
+                self.current_button = button
+        self.merge_all = QtWidgets.QCheckBox("所选视频均合并分P")
+        self.merge_all.setToolTip("每个视频分别合并；不会把不同视频拼在一起。原分P文件保留。")
+        self.merge_all.toggled.connect(self.set_merge_all)
+        toolbar.addWidget(self.merge_all)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        self.tree = QtWidgets.QTreeWidget()
+        self.tree.setHeaderLabels(["播放列表 / 视频 / 分P", "合并分P"])
+        self.tree.setColumnWidth(1, 140)
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.itemChanged.connect(self.on_item_changed)
+        layout.addWidget(self.tree, 1)
+        options = QtWidgets.QHBoxLayout()
+        options.addWidget(QtWidgets.QLabel("合并方式："))
+        self.merge_mode = QtWidgets.QComboBox()
+        self.merge_mode.addItem("优先无损，不兼容时转码", "auto")
+        self.merge_mode.addItem("仅无损合并，不兼容时保留分P并提示", "copy")
+        self.merge_mode.currentIndexChanged.connect(self.update_selection)
+        options.addWidget(self.merge_mode)
+        options.addStretch()
+        layout.addLayout(options)
+        self.summary = QtWidgets.QLabel()
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        buttons = QtWidgets.QHBoxLayout()
+        self.ui.button_back = QtWidgets.QPushButton("返回")
+        self.ui.button_next = QtWidgets.QPushButton("继续")
+        buttons.addWidget(self.ui.button_back)
+        buttons.addWidget(self.ui.button_next)
+        layout.addLayout(buttons)
+
+    def _normalize_legacy(self):
+        if "videos" in self.data:
+            return
+        groups = OrderedDict()
+        for page in self.data["page_data"]:
+            key = str(page["id"])
+            page["video_key"] = key
+            groups.setdefault(key, {"key": key, "title": page["title"], "pages": [],
+                                    "current": True, "error": None})["pages"].append(page)
+        self.data["videos"] = list(groups.values())
+        self.data["default_all"] = True
 
     def data_update(self, back):
         if back:
             return
-        self.ui.table_selection.setRowCount(0)
-        self.ui.button_next.setEnabled(True)
-        self.meta: QtCore.QByteArray = self.parent().input_pages[1].meta
-        self.data = pickle.loads(self.meta.data())
-        for i in self.data["page_data"]:
-            box = CentralCheckBox()
-            box.get_box().setChecked(True)
-            i["box"] = box
-            box.get_box().toggled.connect(self.on_check_button_changed)
-            item_text = QtWidgets.QTableWidgetItem(i["name"])
-            self.ui.table_selection.setRowCount(self.ui.table_selection.rowCount() + 1)
-            self.ui.table_selection.setCellWidget(
-                self.ui.table_selection.rowCount() - 1, 0, box
-            )
-            self.ui.table_selection.setItem(
-                self.ui.table_selection.rowCount() - 1, 1, item_text
-            )
+        self._building = True
+        self.tree.clear()
+        self.video_items.clear()
+        self.merge_boxes.clear()
+        self.data = pickle.loads(self.parent().input_pages[1].meta.data())
+        self._normalize_legacy()
+        self.merge_all.setChecked(False)
+        self.root = QtWidgets.QTreeWidgetItem(self.tree, [str(self.data["title"]), ""])
+        self.root.setFlags(self.root.flags() | QtCore.Qt.ItemFlag.ItemIsAutoTristate | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+        self.root.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
+        for group in self.data["videos"]:
+            label = "{}  [{}]（{}P）".format(group["title"], group["key"], len(group["pages"]))
+            if group.get("current"):
+                label += "  ← 当前视频"
+            item = QtWidgets.QTreeWidgetItem(self.root, [label, ""])
+            self.video_items[group["key"]] = item
+            if group.get("error"):
+                item.setText(0, label + "  解析失败")
+                item.setToolTip(0, group["error"])
+                item.setDisabled(True)
+                continue
+            item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsAutoTristate | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            checked = self.data.get("default_all", True) or group.get("current")
+            for page in group["pages"]:
+                part = QtWidgets.QTreeWidgetItem(item, ["P{:03d}  {}".format(page["page"], page["name"]), ""])
+                part.setFlags(part.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+                part.setCheckState(0, QtCore.Qt.CheckState.Checked if checked else QtCore.Qt.CheckState.Unchecked)
+                page["tree_item"] = part
+                page["video_key"] = group["key"]
+            box = QtWidgets.QCheckBox("合并所选分P")
+            box.setToolTip("至少选择2个分P；仅合并当前视频中的所选分P，顺序按P号排列。原分P文件保留。")
+            box.toggled.connect(self.update_selection)
+            self.merge_boxes[group["key"]] = box
+            self.tree.setItemWidget(item, 1, box)
+            item.setExpanded(bool(group.get("current")) or group is self.data["videos"][0])
+        self.root.setExpanded(True)
+        self.current_button.setEnabled(any(group.get("current") for group in self.data["videos"]))
+        self._building = False
+        self.update_selection()
 
-    @QtCore.Slot(bool)
-    def on_check_button_changed(self, _checked: bool):
-        count = 0
-        for i in self.data["page_data"]:
-            box = i["box"]
-            box = box.get_box()
-            if box.isChecked():
-                count += 1
-        self.ui.button_next.setEnabled(count > 0)
-
-    @QtCore.Slot()
-    def on_help_button_clicked(self):
-        QtWidgets.QMessageBox.information(self, "选集帮助", SELECTTON_HELP)
-
-    @QtCore.Slot()
-    def on_set_button_clicked(self):
-        selection_str = self.ui.line_selection.text()
-
-        # Defult to select all
-        if len(selection_str) == 0:
-            for i in self.data["page_data"]:
-                tmp = i["box"].get_box()
-                tmp.setChecked(not tmp.isChecked())
+    def select_all(self, checked):
+        if self.data is None:
             return
+        self._building = True
+        for page in self.data["page_data"]:
+            if "tree_item" in page:
+                page["tree_item"].setCheckState(0, QtCore.Qt.CheckState.Checked if checked else QtCore.Qt.CheckState.Unchecked)
+        self._building = False
+        self.update_selection()
 
-        selection_str = selection_str.replace(" ", "")
-        selections = selection_str.split(",")
-        selected = []
-        select_max = -1
-        if len(selections) == 0:
-            QtWidgets.QMessageBox.critical(self, "错误", "语法错误")
+    def select_current(self):
+        self._building = True
+        for group in self.data["videos"]:
+            for page in group["pages"]:
+                page["tree_item"].setCheckState(0, QtCore.Qt.CheckState.Checked if group.get("current") else QtCore.Qt.CheckState.Unchecked)
+        self._building = False
+        self.update_selection()
+
+    def set_merge_all(self, checked):
+        self._building = True
+        for box in self.merge_boxes.values():
+            box.setChecked(checked)
+        self._building = False
+        self.update_selection()
+
+    def on_item_changed(self, _item, _column):
+        self.update_selection()
+
+    def update_selection(self, *_args):
+        if self._building or self.data is None:
             return
-        for block in selections:
-            if '-' in block:
-                rng = block.split('-')
-                if len(rng) != 2:
-                    QtWidgets.QMessageBox.critical(self, "错误", "语法错误")
-                    return
-                if not rng[0].isdigit() or not rng[1].isdigit():
-                    QtWidgets.QMessageBox.critical(self, "错误", "语法错误")
-                    return
-                if int(rng[0]) < 1:
-                    QtWidgets.QMessageBox.critical(self, "错误", "语法错误")
-                    return
-                if int(rng[0]) > int(rng[1]):
-                    QtWidgets.QMessageBox.critical(self, "错误", "语法错误")
-                    return
-                if int(rng[1]) > len(self.data["page_data"]):
-                    QtWidgets.QMessageBox.critical(self, "错误", "选集过大")
-                    return
-                if int(rng[0]) <= select_max:
-                    QtWidgets.QMessageBox.critical(self, "错误", "顺序错误")
-                    return
-            else:
-                if not block.isdigit():
-                    QtWidgets.QMessageBox.critical(self, "错误", "选集不是数字")
-                    return
-                if int(block) < 1:
-                    QtWidgets.QMessageBox.critical(self, "错误", "语法错误")
-                    return
-                if int(block) > len(self.data["page_data"]):
-                    QtWidgets.QMessageBox.critical(self, "错误", "选集过大")
-                    return
-                if int(block) <= select_max:
-                    QtWidgets.QMessageBox.critical(self, "错误", "顺序错误")
-                    return
-                rng = [int(block)] * 2
-
-            for i in range(int(rng[0]) - 1, int(rng[1])):
-                selected.append(i)
-                select_max = i
-
-        for i in self.data["page_data"]:
-            i["box"].get_box().setChecked(False)
-
-        for i in selected:
-            self.data["page_data"][i]["box"].get_box().setChecked(True)
+        selected_count, selected_videos = 0, 0
+        merge_keys = []
+        for group in self.data["videos"]:
+            count = 0
+            for page in group["pages"]:
+                page["selected"] = page["tree_item"].checkState(0) == QtCore.Qt.CheckState.Checked
+                count += int(page["selected"])
+            selected_count += count
+            selected_videos += int(count > 0)
+            box = self.merge_boxes.get(group["key"])
+            if box:
+                box.setEnabled(count >= 2)
+                if count >= 2 and box.isChecked():
+                    merge_keys.append(group["key"])
+        self.data["merge_videos"] = merge_keys
+        self.data["merge_mode"] = self.merge_mode.currentData()
+        self.summary.setText("已选 {} 个视频 / {} 个分P；{} 个视频将分别合并分P。".format(selected_videos, selected_count, len(merge_keys)))
+        self.ui.button_next.setEnabled(selected_count > 0)

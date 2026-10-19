@@ -13,6 +13,7 @@ from downloadthread import (
 )
 from ui_downloadwidget import Ui_DownloadWidget
 from utils import configUtils
+from mergethread import PartMergeTask
 
 
 class DownloadWidget(QtWidgets.QWidget):
@@ -64,9 +65,10 @@ class DownloadWidget(QtWidgets.QWidget):
         task["widget"].restart_requested.connect(
             lambda task=task: self.restart_task(task)
         )
+        return task
 
     def _start_task(self, task):
-        thread = DownloadTask(self)
+        thread = PartMergeTask(self) if task.get("kind") == "merge" else DownloadTask(self)
         task["thread"] = thread
         task["pending_action"] = None
         thread.setup(task)
@@ -193,6 +195,12 @@ class DownloadWidget(QtWidgets.QWidget):
         path = os.path.join(task["path"], task["title"], task["name"])
         return os.path.normcase(os.path.abspath(path))
 
+    @classmethod
+    def _task_keys(cls, task):
+        # A running merge also reads its input files. Prevent another queued
+        # download of the same part from replacing them during concatenation.
+        return {cls._task_key(task)} | {cls._task_key(part) for part in task.get("dependencies", [])}
+
     @QtCore.Slot()
     def on_clean_button_clicked(self):
         for task in self.finished:
@@ -235,8 +243,14 @@ class DownloadWidget(QtWidgets.QWidget):
     def timer_timeout(self):
         if len(self.running_tasks) >= self.max_thread_count or not self.tasks:
             return
-        active_keys = {self._task_key(task) for task in self.running_tasks}
+        active_keys = set().union(*(self._task_keys(task) for task in self.running_tasks))
         for index in range(len(self.tasks) - 1, -1, -1):
-            if self._task_key(self.tasks[index]) not in active_keys:
+            task = self.tasks[index]
+            dependencies = task.get("dependencies", [])
+            if any(part["state"] != "completed" for part in dependencies):
+                failed = any(part["state"] == "failed" for part in dependencies)
+                task["widget"].update_status("等待分P完成（有失败项，请重试）" if failed else "等待所选分P下载完成")
+                continue
+            if not self._task_keys(self.tasks[index]) & active_keys:
                 self._start_task(self.tasks.pop(index))
                 break

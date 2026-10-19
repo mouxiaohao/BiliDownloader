@@ -116,3 +116,14 @@ dmypy.json
 
 /src/Lib/bd_client/const.py
 /starter/*.txt
+
+# Local build tools, generated Qt modules and validation downloads
+/.build-tools/
+/.validation/
+/ffmpeg/
+/data/
+/Download/
+/delivery/
+/src/ui_*.py
+/src/res_rc.py
+/src/.ui_compiled.cache

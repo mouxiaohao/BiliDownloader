@@ -12,8 +12,8 @@ from Lib.bili_api.utils.passport import BiliPassport, decode_cookie
 from centralcheckbox import CentralCheckBox
 from ui_configwidget import Ui_ConfigWidget
 from utils import configUtils
-from utils.removeSpecialChars import removeSpecialChars
 from utils.video_codec import video_codec_id
+from downloadplan import build_download_tasks
 
 video_codec_match = {}
 for _i in video_codec_id:
@@ -64,13 +64,8 @@ class ConfigWidget(QtWidgets.QWidget):
         quality = self.quality_match[self.ui.combo_quality.currentText()]
         codec = video_codec_match[self.ui.combo_codec.currentText()]
         userdata = configUtils.UserDataHelper()
-        # reserveAudio = configUtils.getUserData(configUtils.Configs.RESERVE_AUDIO, False)
         reserveAudio = userdata.get(userdata.CFGS.RESERVE_AUDIO, False)
         disable_title_limit = userdata.get(userdata.CFGS.DISABLE_TITLE_LENGTH_LIMIT, False)
-        if disable_title_limit:
-            rmspchar = lambda s: removeSpecialChars(s, None)
-        else:
-            rmspchar = lambda s: removeSpecialChars(s)
         special_audio = None
         if self.ui.combo_audio.isEnabled():
             special_audio = self.ui.combo_audio.currentText()
@@ -83,34 +78,37 @@ class ConfigWidget(QtWidgets.QWidget):
                 ai_language = None
             else:
                 ai_language = self.ai_language_title_map[ai_language]
+        selected_pages = []
         for i in self.data["download_data"]:
             box_danmaku: CentralCheckBox = i["box_danmaku"]
             box_audio: CentralCheckBox = i["box_audio"]
             onlyAudio = box_audio.get_box().isChecked()
-            push = {
+            selected_pages.append({**i, "onlyAudio": onlyAudio, "saveDanmaku": box_danmaku.get_box().isChecked()})
+        options = {
                 "path": self.ui.line_path.text(),
                 "quality": quality,
                 "codec": codec,
-                "name": "{:0>3d}-".format(i["page"]) + rmspchar(i["name"]),
-                "title": rmspchar(i["title"]),
-                "id": i["id"],
-                "isbvid": i["isbvid"],
-                "cid": i["cid"],
                 "reserveAudio": reserveAudio,
-                "onlyAudio": onlyAudio,
-                "saveDanmaku": box_danmaku.get_box().isChecked(),
                 "fnval": self.fnval,
-                "type": i["type"],
                 "specialAudio": special_audio,
                 "aiLanguage": ai_language,
+                "disable_title_limit": disable_title_limit,
             }
-            self.parent().download.push_task(push)
+        try:
+            tasks = build_download_tasks(selected_pages, options, self.data.get("merge_videos", []),
+                                         self.data.get("merge_mode", "auto"))
+        except ValueError as error:
+            QMessageBox.warning(self, "无法提交", str(error))
+            self.ui.button_submit.setEnabled(True)
+            return
+        for task in tasks:
+            self.parent().download.push_task(task)
         self.parent().input_finished()
 
     @QtCore.Slot(str)
     def on_path_changed(self, path: str):
         ex = isdir(path)
-        self.ui.button_submit.setEnabled(ex)
+        self.ui.button_submit.setEnabled(ex and bool(self.quality_match) and getattr(self, "load_thread", None) is None)
         if not ex:
             self.ui.line_path.setStyleSheet(style.BASIC_FONT_STYLE + style.RED_TEXT)
         else:
@@ -154,11 +152,13 @@ class ConfigWidget(QtWidgets.QWidget):
     def load_finish(self):
         QtCore.QObject.disconnect(self.load_thread, None, self, None)
         del self.load_thread
+        self.on_path_changed(self.ui.line_path.text())
 
     def data_update(self, _back):
         self.ui.widget.setEnabled(False)
         self.ui.button_submit.setEnabled(False)
         self.ui.combo_quality.clear()
+        self.quality_match = {}
 
         self.ui.combo_audio.clear()
         self.ui.combo_audio.setToolTip(None)
@@ -190,13 +190,17 @@ class ConfigWidget(QtWidgets.QWidget):
         only_audio = userdata.get(userdata.CFGS.DOWNLOAD_AUDIO_ONLY, False)
         self.data["download_data"] = []
         for i in self.data["page_data"]:
-            if not i["box"].get_box().isChecked():
+            if not i.get("selected", False):
                 continue
             self.ui.table_downloads.setRowCount(self.ui.table_downloads.rowCount() + 1)
             i["box_danmaku"] = CentralCheckBox()
             i["box_danmaku"].get_box().setChecked(download_danmaku)
             i["box_audio"] = CentralCheckBox()
             i["box_audio"].get_box().setChecked(only_audio)
+            if i.get("video_key") in self.data.get("merge_videos", []):
+                i["box_audio"].get_box().setChecked(False)
+                i["box_audio"].get_box().setEnabled(False)
+                i["box_audio"].setToolTip("此视频已选择合并分P，需要同时下载视频")
             self.ui.table_downloads.setCellWidget(
                 self.ui.table_downloads.rowCount() - 1, 0, i["box_danmaku"]
             )
@@ -204,10 +208,11 @@ class ConfigWidget(QtWidgets.QWidget):
                 self.ui.table_downloads.rowCount() - 1, 1, i["box_audio"]
             )
             self.ui.table_downloads.setItem(
-                self.ui.table_downloads.rowCount() - 1, 2, QTableWidgetItem(i["name"])
+                self.ui.table_downloads.rowCount() - 1, 2,
+                QTableWidgetItem("{} · P{:03d} {}".format(i["title"], i["page"], i["name"]))
             )
             self.data["download_data"].append(i)
-        page = self.data["page_data"][0]
+        page = self.data["download_data"][0]
         self.load_thread = GetVideoInfo(page["id"], page["isbvid"], page["cid"], self.fnval, page["type"], self)
         self.load_thread.update_info.connect(self.update_info)
         self.load_thread.finished.connect(self.load_finish)

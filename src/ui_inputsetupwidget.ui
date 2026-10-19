@@ -35,14 +35,14 @@
    <item>
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>输入想要下载的视频号或链接：</string>
+      <string>输入视频号、视频地址或播放列表地址：</string>
      </property>
     </widget>
    </item>
    <item>
     <widget class="QLabel" name="label_2">
      <property name="text">
-      <string>需要包含AV、BV、MD、和EP号</string>
+      <string>支持 BV / AV / MD / EP，以及合集、系列、收藏夹链接</string>
      </property>
     </widget>
    </item>

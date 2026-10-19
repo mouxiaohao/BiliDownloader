@@ -12,6 +12,10 @@ from utils import configUtils
 def update_cwd():
     APP_DIR_NAME = ".bili_downloader"
 
+    if getattr(sys, "frozen", False):
+        os.chdir(pathlib.Path(sys.executable).parent)
+        return
+
     # change cwd when not meet the requirements
     if os.path.samefile(os.path.split(__file__)[0], os.getcwd()) and sys.platform == "win32":
         os.chdir(os.path.split(os.getcwd())[0])
@@ -46,10 +50,17 @@ def install_font_for_portable_windows():
 
 
 if __name__ == "__main__":
-    install_font_for_portable_windows()
+    if "--self-check" in sys.argv:
+        from selfcheck import main as selfcheck_main
+        sys.exit(selfcheck_main(sys.argv[1:]))
     updateHighDpi()
     app = QtWidgets.QApplication(sys.argv)
+    font_file = pathlib.Path(__file__).resolve().parent / "font" / "HarmonyOS_Sans_SC_Regular.ttf"
+    if font_file.is_file():
+        QtGui.QFontDatabase.addApplicationFont(str(font_file))
     font = app.font()
+    if font_file.is_file():
+        font.setFamily("HarmonyOS Sans SC")
 
     font.setHintingPreference(QtGui.QFont.HintingPreference.PreferNoHinting)
     # font.setStyleStrategy(QtGui.QFont.StyleStrategy.PreferAntialias)

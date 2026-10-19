@@ -16,6 +16,7 @@ from Lib.bili_api.utils import BiliPassport
 from Lib.bili_api.utils.passport import decode_cookie
 from Lib.xml2ass import convertMain
 from utils import configUtils
+from utils.media_merge import find_media_tool
 
 _DEFAULT_HEADERS = {
     "Referer": "https://www.bilibili.com",
@@ -545,9 +546,7 @@ class DownloadTask(QtCore.QThread):
         merge_name = "{}_merge.mp4".format(self.task["tempName"])
         if root_dir.exists(merge_name) and not root_dir.remove(merge_name):
             raise RuntimeError("无法清理合并临时文件")
-        ffmpeg_path = QtCore.QDir("ffmpeg").absoluteFilePath(
-            "ffmpeg" + ("" if sys.platform == "linux" else ".upx.exe")
-        )
+        ffmpeg_path = find_media_tool("ffmpeg")
         command = [
             ffmpeg_path,
             "-i",
@@ -745,10 +744,10 @@ class DownloadTask(QtCore.QThread):
             self.result = RESULT_CANCELLED
         except Exception as error:
             self.result = RESULT_FAILED
-            self.update_status.emit("下载失败：{}".format(error))
+            self.update_status.emit("{}失败：{}".format("合并" if self.task.get("kind") == "merge" else "下载", error))
         else:
             self.result = RESULT_COMPLETED
-            self.update_status.emit("下载完成")
+            self.update_status.emit("合并完成" if self.task.get("kind") == "merge" else "下载完成")
             self.update_finished.emit()
         finally:
             self.pause_available.emit(False)
