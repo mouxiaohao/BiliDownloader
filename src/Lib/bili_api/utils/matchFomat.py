@@ -9,6 +9,9 @@ _matchers = [re.compile(r'(BV|bv)[\d,a-zA-z]{10}'), re.compile(r'(AV|av)\d+'), r
 
 
 def matchAll(in_: str) -> Union[str, None]:
+    from ..collection import parse_playlist_url
+    if parse_playlist_url(in_):
+        return "LIST"
     matches: List[Union[re.Match,None]] = []
     for i in _fmatchers:
         matches.append(i.search(in_))

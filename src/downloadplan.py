@@ -1,0 +1,46 @@
+"""Build part tasks and per-video dependent merge tasks without UI state."""
+from collections import OrderedDict
+
+from utils.removeSpecialChars import removeSpecialChars
+
+
+def build_download_tasks(pages, options, merge_videos=(), merge_mode="auto"):
+    layout = options.get("output_layout", "per_video")
+    if layout not in ("per_video", "shared"):
+        raise ValueError("未知的存放方式")
+    delete_after_merge = bool(options.get("delete_after_merge", True))
+    groups = OrderedDict()
+    tasks = []
+    for page in pages:
+        key = str(page.get("video_key", page["id"]))
+        def clean(value):
+            # Old profiles may still contain the former 20-character option.
+            # Output names always retain the full video and part titles now.
+            return removeSpecialChars(str(value)).rstrip(" .") or "_"
+        part = {key_: value for key_, value in options.items()
+                if key_ not in ("disable_title_limit", "output_layout", "delete_after_merge")}
+        part.update({key_: page[key_] for key_ in ("id", "isbvid", "cid", "type")})
+        video_name = "{} [{}]".format(clean(page["title"]), clean(key))
+        name = "{:03d}-{}".format(page["page"], clean(page["name"]))
+        part.update({"name": video_name + "__P" + name if layout == "shared" else name,
+                     "title": video_name, "directory": "" if layout == "shared" else video_name,
+                     "video_key": key, "page": page["page"], "kind": "part",
+                     "delete_after_merge": False,
+                     "saveDanmaku": page.get("saveDanmaku", False),
+                     "onlyAudio": page.get("onlyAudio", False)})
+        groups.setdefault(key, []).append(part)
+    for key, parts in groups.items():
+        parts.sort(key=lambda part: part["page"])
+        tasks.extend(parts)
+        if key not in merge_videos or len(parts) < 2:
+            continue
+        if any(part["onlyAudio"] for part in parts):
+            raise ValueError("合并分P的视频不能选择“仅下载音频”")
+        for part in parts:
+            part["delete_after_merge"] = delete_after_merge
+        tasks.append({"kind": "merge", "path": parts[0]["path"], "title": parts[0]["title"],
+                      "directory": parts[0]["directory"],
+                      "name": parts[0]["title"],
+                      "video_key": key, "dependencies": parts, "merge_mode": merge_mode,
+                      "delete_after_merge": delete_after_merge})
+    return tasks

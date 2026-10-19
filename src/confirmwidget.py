@@ -9,6 +9,8 @@ from Lib.bili_api.exceptions import NetWorkException
 from Lib.bili_api.utils import loadImage
 from ui_confirmwidget import Ui_ConfirmWidget
 from utils import configUtils
+from Lib.bili_api.collection import resolve_tree
+from Lib.bili_api.utils.passport import BiliPassport, decode_cookie
 
 
 class ConfirmWidget(QtWidgets.QWidget):
@@ -21,6 +23,8 @@ class ConfirmWidget(QtWidgets.QWidget):
         self.meta = None
 
     def on_size_change(self):
+        if self.img is None or self.img.isNull():
+            return
         img = self.img.scaledToWidth(
             self.ui.cover_label.width(), QtCore.Qt.TransformationMode.SmoothTransformation
         )
@@ -44,6 +48,7 @@ class ConfirmWidget(QtWidgets.QWidget):
     def load_end(self):
         QtCore.QObject.disconnect(self.load_thread, None, self, None)
         del self.load_thread
+        self.ui.button_back.setEnabled(True)
         if not self.err:
             self.ui.button_next.setEnabled(True)
 
@@ -66,6 +71,7 @@ class ConfirmWidget(QtWidgets.QWidget):
         self.ui.cover_label.setPixmap(QtGui.QPixmap.fromImage(img))
         self.ui.text_info.setText("")
         self.ui.button_next.setDisabled(True)
+        self.ui.button_back.setEnabled(False)
         fmt, content = self.parent().input_pages[0].get_content()
         self.load_thread = load_map[fmt](self, content)
         self.load_thread.update_info.connect(self.update_info)
@@ -98,6 +104,41 @@ class LoadInfoBase(QtCore.QThread):
 
     def load_data(self):
         pass
+
+
+class LoadInfoTree(LoadInfoBase):
+    def __init__(self, parent, content):
+        super().__init__(parent, "TREE", content)
+
+    def progress(self, text):
+        if self.isInterruptionRequested():
+            raise InterruptedError("已取消解析")
+        self.update_info.emit(text, False)
+
+    def load_data(self):
+        raw = configUtils.getUserData(configUtils.Configs.PASSPORT)
+        passport = None
+        if raw:
+            cookie = raw.get("data")
+            if cookie is None and raw.get("secure_data"):
+                cookie = decode_cookie(raw["secure_data"], configUtils.getUserData(configUtils.Configs.PASSPORT_CRYPT_KEY))
+            if cookie:
+                passport = BiliPassport({k: v for k, v in cookie.items() if k != "Expires"})
+        tree = resolve_tree(self.content, passport, self.progress)
+        self.update_meta.emit(QByteArray(pickle.dumps(tree)))
+        text = "{}\n\n共 {} 个视频，{} 个分P".format(tree["title"], len(tree["videos"]), len(tree["page_data"]))
+        if tree["playlist"]:
+            text += "\n已识别所属播放列表，可在下一页按视频和分P选择。"
+        if tree["current_bvid"] and len(tree["videos"]) > 1:
+            text += "\n默认只勾选当前视频；点击全选可下载整个列表。"
+        if tree["warnings"]:
+            text += "\n\n提示：\n" + "\n".join(tree["warnings"][:5])
+        self.update_info.emit(text, False)
+        if tree.get("cover"):
+            try:
+                self.update_image.emit(QtGui.QImage.fromData(loadImage.load_bili_image(tree["cover"])))
+            except Exception:
+                pass
 
 
 class LaodInfoAV(LoadInfoBase):
@@ -277,8 +318,9 @@ class LoadInfoEP(LoadInfoBase):
 
 
 load_map = {
-    "AV": LaodInfoAV,
-    "BV": LoadInfoBV,
+    "AV": LoadInfoTree,
+    "BV": LoadInfoTree,
+    "LIST": LoadInfoTree,
     "MD": LoadInfoMD,
     "EP": LoadInfoEP,
 }

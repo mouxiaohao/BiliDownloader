@@ -58,7 +58,10 @@ class InputSetupWidget(QWidget):
             return
         self.ui.line_input.setStyleSheet(style.BASIC_FONT_STYLE)
         final = ""
-        if matched == "AV":
+        if matched == "LIST":
+            final = format_string.strip()
+            self.ui.label_hint.setText("播放列表地址：将读取视频及各自的分P")
+        elif matched == "AV":
             final = matchFomat.getAvid(format_string)
             self.ui.label_hint.setText(f"匹配到的AV号: {final}")
         elif matched == "BV":
@@ -71,7 +74,7 @@ class InputSetupWidget(QWidget):
             final = matchFomat.getMdid(format_string)
             self.ui.label_hint.setText(f"匹配到的MD号: {final}")
         self.matched = matched
-        self.content = final
+        self.content = format_string.strip() if matched in ("BV", "AV", "LIST") else final
         self.ui.button_next.setEnabled(True)
 
     def get_content(self):

@@ -8,7 +8,7 @@ from dialogdownloadupdate import DialogDownloadUpdate
 from dialogupdateinfo import DialogUpdateInfo
 from ui_mainwindow import Ui_MainWindow
 from update import UpdateChecker, UpdateDownloader
-from utils import init, configUtils
+from utils import init, configUtils, version
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -21,6 +21,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        self.setWindowTitle("BiliDownloader {} · 播放列表与分P".format(version.__version__))
+        self.setMinimumSize(950, 650)
 
         tab_names = ["输入", "下载", "设置", "关于"]
         for i in range(len(tab_names)):
@@ -116,6 +118,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         self.tabs[2].save_settings()
+        loading = []
+        for page in self.tabs[0].input_pages:
+            thread = getattr(page, "load_thread", None)
+            if thread is not None and thread.isRunning():
+                thread.requestInterruption()
+                loading.append(thread)
+        for thread_name in ("update_thread", "check_account_thread", "download_thread"):
+            thread = getattr(self, thread_name, None)
+            if thread is not None and thread.isRunning():
+                loading.append(thread)
+        if loading:
+            self.ui.widget_download.shutdown()
+            event.ignore()
+            QtCore.QTimer.singleShot(100, self.close)
+            return
         if self.ui.widget_download.shutdown():
             event.accept()
         else:

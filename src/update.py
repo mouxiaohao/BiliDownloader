@@ -6,12 +6,14 @@ from urllib.request import Request, urlopen
 
 from PySide6 import QtCore
 
-from Lib.bd_client import BDClient
 from utils import version
 
 HOST = "www.majjcom.site"
 PORT = 11289
 NO_UPDATE = True
+
+if not NO_UPDATE:
+    from Lib.bd_client import BDClient
 
 
 class UpdateChecker(QtCore.QThread):

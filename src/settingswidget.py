@@ -55,7 +55,6 @@ class SettingsWidget(QtWidgets.QWidget):
         qt_style = self.userdata.get(self.userdata.CFGS.QT_STYLE, "default")
         high_dpi = self.userdata.get(self.userdata.CFGS.APPLY_HIGH_DPI, True)
         only_audio = self.userdata.get(self.userdata.CFGS.DOWNLOAD_AUDIO_ONLY, False)
-        disable_title_limit = self.userdata.get(self.userdata.CFGS.DISABLE_TITLE_LENGTH_LIMIT, False)
         read_clipboard = self.userdata.get(self.userdata.CFGS.AUTO_FILL_DATA_FROM_CLIPBOARD, True)
         dolby_audio = self.userdata.get(self.userdata.CFGS.PULL_DOLBY_AUDIO, False)
         self.ui.spin_threads.setValue(max_thread_count)
@@ -68,11 +67,16 @@ class SettingsWidget(QtWidgets.QWidget):
         self.ui.line_login.setText("未登录" if passport is None else "已登录")
         self.ui.combo_style.setCurrentText(qt_style)
         self.ui.check_highdpi.setChecked(high_dpi)
-        self.ui.check_close_text_len_limit.setChecked(disable_title_limit)
         self.ui.check_read_clipboard.setChecked(read_clipboard)
         self.ui.check_dolby_audio.setChecked(dolby_audio)
 
     def save_settings(self):
+        # The input page owns these preferences. Preserve its latest values
+        # when this long-lived settings object writes other settings on exit.
+        for key in (self.userdata.CFGS.OUTPUT_LAYOUT, self.userdata.CFGS.DELETE_PARTS_AFTER_MERGE):
+            value = configUtils.getUserData(key)
+            if value is not None:
+                self.userdata.set(key, value)
         path = self.ui.line_path.text()
         audio = self.ui.check_reserve_audio.isChecked()
         danmaku = self.ui.check_danmaku.isChecked()
@@ -82,7 +86,6 @@ class SettingsWidget(QtWidgets.QWidget):
         qt_style = self.ui.combo_style.currentText()
         only_audio = self.ui.check_audio.isChecked()
         high_dpi = self.ui.check_highdpi.isChecked()
-        disable_title_limit = self.ui.check_close_text_len_limit.isChecked()
         read_clipboard = self.ui.check_read_clipboard.isChecked()
         dolby_audio = self.ui.check_dolby_audio.isChecked()
         self.userdata.set(self.userdata.CFGS.VIDEO_CODEC, codec)
@@ -94,7 +97,6 @@ class SettingsWidget(QtWidgets.QWidget):
         self.userdata.set(self.userdata.CFGS.QT_STYLE, qt_style)
         self.userdata.set(self.userdata.CFGS.DOWNLOAD_AUDIO_ONLY, only_audio)
         self.userdata.set(self.userdata.CFGS.APPLY_HIGH_DPI, high_dpi)
-        self.userdata.set(self.userdata.CFGS.DISABLE_TITLE_LENGTH_LIMIT, disable_title_limit)
         self.userdata.set(self.userdata.CFGS.AUTO_FILL_DATA_FROM_CLIPBOARD, read_clipboard)
         self.userdata.set(self.userdata.CFGS.PULL_DOLBY_AUDIO, dolby_audio)
         self.userdata.save()
