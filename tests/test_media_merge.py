@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from utils.media_merge import find_media_tool, merge_parts, probe_media, run_media_process
+from utils.media_merge import cleanup_merged_sources, find_media_tool, merge_parts, probe_media, run_media_process
 
 
 def make_clip(path, color, size="160x90", frequency=440, audio=True):
@@ -59,3 +59,52 @@ def test_failure_does_not_replace_previous_output_or_delete_sources(tmp_path):
     assert output.read_bytes() == b"existing output"
     assert first.exists()
     assert not list(tmp_path.glob(".bili-merge-*"))
+
+
+@pytest.fixture
+def merged_clips(tmp_path):
+    first, second, output = tmp_path / "a.mp4", tmp_path / "b.mp4", tmp_path / "joined.mp4"
+    make_clip(first, "red")
+    make_clip(second, "blue")
+    result = merge_parts([first, second], output)
+    return first, second, output, result
+
+
+def test_success_cleanup_deletes_only_participating_parts(merged_clips, tmp_path):
+    first, second, output, result = merged_clips
+    unrelated = tmp_path / "other-video.mp4"
+    unrelated.write_bytes(b"unselected video")
+    subtitle = tmp_path / "a.ass"
+    subtitle.write_text("selected separate subtitle", encoding="utf-8")
+    cleanup = cleanup_merged_sources(result)
+    assert set(cleanup["deleted"]) == {str(first), str(second)}
+    assert not cleanup["errors"]
+    assert not first.exists() and not second.exists()
+    assert output.exists() and unrelated.exists() and subtitle.exists()
+    assert probe_media(output)["streams"]
+
+
+def test_cleanup_keeps_parts_if_merged_output_changed(merged_clips):
+    first, second, output, result = merged_clips
+    output.write_bytes(b"invalid output")
+    cleanup = cleanup_merged_sources(result)
+    assert not cleanup["deleted"] and cleanup["errors"]
+    assert first.exists() and second.exists()
+
+
+def test_cleanup_preserves_a_part_modified_after_merge(merged_clips):
+    first, second, _output, result = merged_clips
+    first.write_bytes(b"replacement belongs to another download")
+    cleanup = cleanup_merged_sources(result)
+    assert first.exists() and str(first) in cleanup["retained"]
+    assert not second.exists()
+
+
+def test_cleanup_defers_inputs_needed_by_another_task(merged_clips):
+    first, second, output, result = merged_clips
+    initial = cleanup_merged_sources(result, [first])
+    assert initial["pending"] == [str(first)]
+    assert first.exists() and not second.exists() and output.exists()
+    final = cleanup_merged_sources(result)
+    assert final["deleted"] == [str(first)]
+    assert not first.exists() and not final["pending"]

@@ -64,6 +64,49 @@ def _concat_file(paths, target):
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def file_identity(path):
+    info = Path(path).stat()
+    return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+
+
+def cleanup_merged_sources(result, protected_paths=()):
+    """Remove exact verified inputs, never scan/delete a folder's other files.
+
+    Protected inputs are still needed by another task; the queue may retry their
+    cleanup later. Changed/in-use files are retained and reported to the user.
+    """
+    answer = {"deleted": [], "pending": [], "retained": [], "errors": []}
+    sources = result.get("source_files", [])
+    output = Path(result["output"])
+    try:
+        if not result.get("verified") or file_identity(output) != result.get("output_identity"):
+            raise ValueError("合并文件已变化或未通过验证，保留源分P")
+    except (OSError, ValueError) as error:
+        answer["retained"] = [item["path"] for item in sources]
+        answer["errors"].append(str(error))
+        return answer
+    key = lambda path: os.path.normcase(str(Path(path).resolve()))
+    protected = {key(path) for path in protected_paths}
+    for item in sources:
+        path = Path(item["path"])
+        if key(path) in protected:
+            answer["pending"].append(str(path))
+            continue
+        try:
+            if path.parent.resolve() != output.parent.resolve() or path.suffix.lower() != ".mp4" or key(path) == key(output):
+                raise ValueError("源分P路径不属于本次输出目录，已保留：{}".format(path))
+            if not path.exists():
+                continue
+            if file_identity(path) != item["identity"]:
+                raise ValueError("分P文件已变化，已保留：{}".format(path.name))
+            path.unlink()
+            answer["deleted"].append(str(path))
+        except (OSError, ValueError) as error:
+            answer["retained"].append(str(path))
+            answer["errors"].append(str(error))
+    return answer
+
+
 def merge_parts(paths, output, mode="auto", runner=run_media_process, status=None):
     if len(paths) < 2:
         raise ValueError("合并至少需要两个分P")
@@ -75,6 +118,7 @@ def merge_parts(paths, output, mode="auto", runner=run_media_process, status=Non
         raise ValueError("合并输出不能覆盖输入分P")
     if any(not path.is_file() or not path.stat().st_size for path in sources):
         raise RuntimeError("分P尚未全部下载完成，取消合并")
+    source_files = [{"path": str(path), "identity": file_identity(path)} for path in sources]
     if status:
         status("正在核对分P媒体参数")
     infos = [probe_media(path, runner) for path in sources]
@@ -126,6 +170,9 @@ def merge_parts(paths, output, mode="auto", runner=run_media_process, status=Non
         expected_audio = any(stream.get("codec_type") == "audio" for info in infos for stream in info["streams"])
         if expected_audio and not any(stream.get("codec_type") == "audio" for stream in result["streams"]):
             raise RuntimeError("合并结果缺少音频，原分P已保留")
+        if any(file_identity(item["path"]) != item["identity"] for item in source_files):
+            raise RuntimeError("分P在合并过程中发生变化，保留原文件并取消保存")
         os.replace(merged, output)
     return {"output": str(output), "duration": actual, "lossless": compatible,
-            "parts": len(sources)}
+            "parts": len(sources), "verified": True,
+            "source_files": source_files, "output_identity": file_identity(output)}

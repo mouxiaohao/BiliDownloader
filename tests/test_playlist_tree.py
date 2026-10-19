@@ -99,7 +99,8 @@ def app():
     return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
 
-def test_tree_tristate_individual_selection_and_per_video_merge(app):
+def test_tree_tristate_individual_selection_and_per_video_merge(app, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     owner = QtWidgets.QWidget()
     owner.input_pages = [None, SimpleNamespace(meta=QtCore.QByteArray(pickle.dumps(tree_data())))]
     widget = SelectionWidget(owner)
@@ -128,7 +129,11 @@ def test_task_plan_never_merges_across_videos_and_sorts_parts():
     assert len(merges) == 1
     assert [part["page"] for part in merges[0]["dependencies"]] == [1, 3]
     assert {part["video_key"] for part in merges[0]["dependencies"]} == {BV1}
-    assert tasks[0]["title"] != tasks[1]["title"]  # Same title, distinct BV output folders.
+    first = next(task for task in tasks if task["video_key"] == BV1)
+    second = next(task for task in tasks if task["video_key"] == BV2)
+    assert first["directory"] != second["directory"]  # Same title, distinct BV output folders.
+    assert [(task["kind"], task["video_key"]) for task in tasks] == [
+        ("part", BV1), ("part", BV1), ("merge", BV1), ("part", BV2)]
     pages[0]["onlyAudio"] = True
     with pytest.raises(ValueError, match="仅下载音频"):
         build_download_tasks(pages, {"path": "download"}, [BV1])
@@ -140,7 +145,7 @@ def test_scheduler_waits_for_success_and_locks_merge_inputs(app, monkeypatch, tm
     widget.timer.stop()
     first = {"path": str(tmp_path), "title": "video", "name": "P1", "state": "failed"}
     messages = []
-    merge = {"path": str(tmp_path), "title": "video", "name": "merged", "dependencies": [first],
+    merge = {"kind": "merge", "path": str(tmp_path), "title": "video", "name": "merged", "dependencies": [first],
              "widget": SimpleNamespace(update_status=messages.append)}
     widget.tasks = [merge]
     started = []
@@ -158,4 +163,114 @@ def test_scheduler_waits_for_success_and_locks_merge_inputs(app, monkeypatch, tm
     widget.timer_timeout()
     assert started == [unrelated]
     assert widget.tasks == [overlapping]
+    widget.close()
+
+
+@pytest.mark.parametrize("layout", ["per_video", "shared"])
+@pytest.mark.parametrize("delete", [True, False])
+def test_output_layout_avoids_collisions_and_cleanup_is_explicit(layout, delete, tmp_path):
+    from utils.taskpaths import task_directory, task_file
+    tree = tree_data()
+    tasks = build_download_tasks(tree["page_data"], {"path": str(tmp_path), "output_layout": layout,
+                                                   "delete_after_merge": delete}, [BV1, BV2])
+    assert len({str(task_file(task)) for task in tasks}) == len(tasks)
+    merges = [task for task in tasks if task["kind"] == "merge"]
+    assert len(merges) == 2 and all(task["delete_after_merge"] == delete for task in merges)
+    if layout == "shared":
+        assert {task_directory(task) for task in tasks} == {tmp_path}
+        assert all(task["video_key"] in task["name"] for task in tasks)
+    else:
+        assert len({task_directory(task) for task in tasks}) == 2
+
+
+def test_storage_and_cleanup_preferences_persist(app, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    owner = QtWidgets.QWidget()
+    owner.input_pages = [None, SimpleNamespace(meta=QtCore.QByteArray(pickle.dumps(tree_data())))]
+    widget = SelectionWidget(owner)
+    widget.data_update(False)
+    widget.output_layout.setCurrentIndex(widget.output_layout.findData("shared"))
+    widget.merge_boxes[BV1].setChecked(True)
+    assert widget.delete_parts.isEnabled()
+    widget.delete_parts.setChecked(False)
+    widget.ui.button_next.click()
+    another = SelectionWidget(owner)
+    another.data_update(False)
+    assert another.data["output_layout"] == "shared"
+    assert another.data["delete_after_merge"] is False
+    owner.close()
+
+
+def test_settings_save_does_not_overwrite_new_storage_preferences(app, monkeypatch, tmp_path):
+    from settingswidget import SettingsWidget
+    from utils import configUtils
+    monkeypatch.chdir(tmp_path)
+    settings = SettingsWidget(None)
+    settings.load_settings()
+    configUtils.setUserData(configUtils.Configs.OUTPUT_LAYOUT, "shared")
+    configUtils.setUserData(configUtils.Configs.DELETE_PARTS_AFTER_MERGE, False)
+    settings.ui.spin_threads.setValue(2)
+    settings.save_settings()
+    assert configUtils.getUserData(configUtils.Configs.OUTPUT_LAYOUT) == "shared"
+    assert configUtils.getUserData(configUtils.Configs.DELETE_PARTS_AFTER_MERGE) is False
+    settings.close()
+
+
+def scheduler_plan(tmp_path):
+    tasks = build_download_tasks(tree_data()["page_data"], {"path": str(tmp_path)}, [BV1, BV2])
+    for task in tasks:
+        task["state"] = "queued"
+        task["widget"] = SimpleNamespace(update_status=lambda _text: None)
+    return tasks
+
+
+def test_ready_merge_has_priority_with_full_download_slots(app, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    widget = DownloadWidget(None)
+    widget.timer.stop()
+    tasks = scheduler_plan(tmp_path)
+    first_merge = next(task for task in tasks if task["kind"] == "merge")
+    for part in first_merge["dependencies"]:
+        part["state"] = "completed"
+    later_parts = [task for task in tasks if task["video_key"] == BV2]
+    widget.all_tasks = tasks
+    # Put later downloads ahead of the ready merge to reproduce the old bug.
+    widget.tasks = list(reversed(later_parts + [first_merge]))
+    widget.max_thread_count = 1
+    widget.running_tasks = [{"kind": "part", "path": str(tmp_path), "title": "unrelated", "name": "active"}]
+    started = []
+    def start(task):
+        task["state"] = "running"
+        widget.running_tasks.append(task)
+        started.append(task)
+    monkeypatch.setattr(widget, "_start_task", start)
+    widget.timer_timeout()
+    assert started == [first_merge]
+    assert all(part["state"] == "queued" for part in later_parts)
+    widget.close()
+
+
+def test_next_video_waits_for_current_video_merge(app, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    widget = DownloadWidget(None)
+    widget.timer.stop()
+    tasks = scheduler_plan(tmp_path)
+    widget.all_tasks = tasks
+    widget.tasks = list(reversed(tasks))
+    widget.max_thread_count = 1
+    started = []
+    def start(task):
+        task["state"] = "running"
+        widget.running_tasks.append(task)
+        started.append(task)
+    monkeypatch.setattr(widget, "_start_task", start)
+    first_merge = next(task for task in tasks if task["kind"] == "merge")
+    for expected in [*first_merge["dependencies"], first_merge]:
+        widget.timer_timeout()
+        assert started[-1] is expected
+        assert all(task["video_key"] == BV1 for task in started)
+        expected["state"] = "completed"
+        widget.running_tasks.remove(expected)
+    widget.timer_timeout()
+    assert started[-1]["video_key"] == BV2
     widget.close()

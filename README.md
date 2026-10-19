@@ -2,6 +2,8 @@
 
 本 fork 增加了 **播放列表 → 视频 → 分P** 的树形选择，以及**同一视频内的所选分P合并**。支持直接粘贴合集/系列/收藏夹地址，或从视频链接自动检测所属合集。每个视频可独立勾选分P与是否合并，不会将整个播放列表拼成一个视频。
 
+1.5.1 按视频依次完成下载、合并及清理，提供“合并成功后删除分P”和“独立文件夹/统一文件夹”的选项。
+
 操作、构建与验证说明见 [USAGE-zh_CN.md](USAGE-zh_CN.md)。原项目及许可证保留如下。
 
 ![tag](https://img.shields.io/badge/Language-Python3,_C++-orange.svg) ![tag](https://img.shields.io/badge/License-MIT-green.svg)

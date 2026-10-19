@@ -1,10 +1,10 @@
 import os
-from pathlib import Path
 import subprocess
 import sys
 
 from downloadthread import DownloadTask
 from utils.media_merge import merge_parts
+from utils.taskpaths import task_file
 
 
 class PartMergeTask(DownloadTask):
@@ -47,8 +47,8 @@ class PartMergeTask(DownloadTask):
         if len(keys) != 1 or self.task["video_key"] not in keys:
             raise RuntimeError("禁止将不同视频的分P拼接在一起")
         ordered = sorted(dependencies, key=lambda part: part["page"])
-        paths = [Path(part["path"]) / part["title"] / (part["name"] + ".mp4") for part in ordered]
-        output = Path(self.task["path"]) / self.task["title"] / (self.task["name"] + ".mp4")
+        paths = [task_file(part) for part in ordered]
+        output = task_file(self.task)
         self.total_size = sum(os.path.getsize(path) for path in paths)
         self._emit_progress(force=True)
         self.enable_restart.emit()

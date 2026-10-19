@@ -50,6 +50,13 @@ def main():
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
     args = parser.parse_args()
+    sys.path.insert(0, str(ROOT / "src"))
+    from utils.version import __version__
+    delivery = ROOT / "delivery"
+    distribution_root = delivery / __version__
+    application = distribution_root / "BiliDownloader"
+    if (application / "data").exists() or (application / "Download").exists():
+        raise RuntimeError("构建目录包含运行数据，请使用新版本目录构建，避免覆盖个人设置或下载文件")
     if sys.platform != "win32" or sys.maxsize <= 2**32:
         raise RuntimeError("请在64位 Windows 上构建")
     media_dir = prepare_ffmpeg()
@@ -58,16 +65,14 @@ def main():
         return
     if not args.skip_tests:
         command([sys.executable, "-m", "pytest", "-q"], cwd=ROOT)
-    delivery = ROOT / "delivery"
     command([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
              "--name", "BiliDownloader", "--icon", str(ROOT / "src/res/icon/icon.ico"),
-             "--paths", str(ROOT / "src"), "--distpath", str(delivery),
+             "--paths", str(ROOT / "src"), "--distpath", str(distribution_root),
              "--workpath", str(ROOT / "build/pyinstaller"), "--specpath", str(ROOT / "build"),
              "--add-data", str(ROOT / "src/Lib/bili_api/utils/data") + ";Lib/bili_api/utils/data",
              "--add-data", str(ROOT / "src/font") + ";font", str(ROOT / "src/main.py")], cwd=ROOT)
-    application = delivery / "BiliDownloader"
     shutil.copytree(media_dir, application / "ffmpeg", dirs_exist_ok=True)
-    for name in ("LICENSE", "CHANGELOG.md", "USAGE-zh_CN.md"):
+    for name in ("LICENSE", "CHANGELOG.md", "USAGE-zh_CN.md", "VALIDATION.md"):
         shutil.copy2(ROOT / name, application / name)
     notices = application / "third-party-licenses"
     notices.mkdir(exist_ok=True)
@@ -108,7 +113,7 @@ def main():
                                 for path in [application / "BiliDownloader.exe", *(application / "ffmpeg").glob("*.exe")]}
     (application / "build-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     archive_base = delivery / ("BiliDownloader-" + __version__ + "-Windows-x64")
-    archive_path = Path(shutil.make_archive(str(archive_base), "zip", delivery, application.name))
+    archive_path = Path(shutil.make_archive(str(archive_base), "zip", distribution_root, application.name))
     checksum = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     archive_path.with_suffix(".zip.sha256").write_text(checksum + "  " + archive_path.name + "\n", encoding="ascii")
     print(str(archive_path))

@@ -20,6 +20,8 @@ class Configs:
     DISABLE_TITLE_LENGTH_LIMIT = "disable_title_length_limit"
     AUTO_FILL_DATA_FROM_CLIPBOARD = "auto_fill_data_from_clipboard"
     PULL_DOLBY_AUDIO = "pull_dolby_audio"
+    OUTPUT_LAYOUT = "output_layout"
+    DELETE_PARTS_AFTER_MERGE = "delete_parts_after_merge"
 
 
 def setupUserData(reset: bool = False) -> None:

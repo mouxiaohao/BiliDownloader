@@ -73,6 +73,12 @@ class SettingsWidget(QtWidgets.QWidget):
         self.ui.check_dolby_audio.setChecked(dolby_audio)
 
     def save_settings(self):
+        # The input page owns these preferences. Preserve its latest values
+        # when this long-lived settings object writes other settings on exit.
+        for key in (self.userdata.CFGS.OUTPUT_LAYOUT, self.userdata.CFGS.DELETE_PARTS_AFTER_MERGE):
+            value = configUtils.getUserData(key)
+            if value is not None:
+                self.userdata.set(key, value)
         path = self.ui.line_path.text()
         audio = self.ui.check_reserve_audio.isChecked()
         danmaku = self.ui.check_danmaku.isChecked()

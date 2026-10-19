@@ -17,6 +17,7 @@ from Lib.bili_api.utils.passport import decode_cookie
 from Lib.xml2ass import convertMain
 from utils import configUtils
 from utils.media_merge import find_media_tool
+from utils.taskpaths import task_directory
 
 _DEFAULT_HEADERS = {
     "Referer": "https://www.bilibili.com",
@@ -688,10 +689,8 @@ class DownloadTask(QtCore.QThread):
         self.update_status.emit("开始下载")
         self.pause_available.emit(True)
 
-        root_dir = QtCore.QDir(self.task["path"])
-        if not root_dir.exists(self.task["title"]):
-            root_dir.mkdir(self.task["title"])
-        if not root_dir.cd(self.task["title"]):
+        root_dir = QtCore.QDir(str(task_directory(self.task)))
+        if not root_dir.mkpath("."):
             raise RuntimeError("无法进入下载目录")
 
         passportRaw = configUtils.getUserData(configUtils.Configs.PASSPORT)

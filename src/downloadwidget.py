@@ -1,5 +1,7 @@
 import os
+import time
 import uuid
+from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore
 
@@ -14,6 +16,8 @@ from downloadthread import (
 from ui_downloadwidget import Ui_DownloadWidget
 from utils import configUtils
 from mergethread import PartMergeTask
+from utils.media_merge import cleanup_merged_sources, file_identity
+from utils.taskpaths import task_directory, task_file
 
 
 class DownloadWidget(QtWidgets.QWidget):
@@ -32,6 +36,8 @@ class DownloadWidget(QtWidgets.QWidget):
         self.running_tasks = []
         self.paused_tasks = []
         self.all_tasks = []
+        self.pending_cleanups = []
+        self.retained_paths = {}
         self._temporary_files_cleaned = False
         self._cleanup_attempts = 0
 
@@ -68,6 +74,7 @@ class DownloadWidget(QtWidgets.QWidget):
         return task
 
     def _start_task(self, task):
+        task["started_at"] = time.monotonic()
         thread = PartMergeTask(self) if task.get("kind") == "merge" else DownloadTask(self)
         task["thread"] = thread
         task["pending_action"] = None
@@ -97,6 +104,7 @@ class DownloadWidget(QtWidgets.QWidget):
 
         pending_action = task.get("pending_action")
         result = thread.result
+        task["finished_at"] = time.monotonic()
         thread.deleteLater()
 
         if pending_action == "restart":
@@ -116,8 +124,60 @@ class DownloadWidget(QtWidgets.QWidget):
             task["widget"].set_task_state("completed")
             if task not in self.finished:
                 self.finished.append(task)
+            if task.get("kind") == "merge":
+                if task.get("delete_after_merge", False):
+                    self.pending_cleanups.append(task)
+                else:
+                    task["widget"].update_status("合并完成，保留分P")
+            elif not task.get("delete_after_merge") and not task.get("onlyAudio"):
+                try:
+                    path = task_file(task).resolve()
+                    self.retained_paths[os.path.normcase(str(path))] = file_identity(path)
+                except OSError:
+                    pass
         elif result in (RESULT_FAILED, RESULT_CANCELLED):
             task["widget"].set_task_state("failed")
+        self._cleanup_finished_merges()
+        if self.timer.isActive():
+            self.timer_timeout()
+
+    def _cleanup_finished_merges(self):
+        for task in list(self.pending_cleanups):
+            result = task.get("merge_result", {})
+            protected = set()
+            for other in self.all_tasks:
+                if other is task or other.get("state") == "completed":
+                    continue
+                inputs = other.get("dependencies", []) if other.get("kind") == "merge" else [other]
+                protected.update(str(task_file(part).resolve()) for part in inputs)
+            source_files = result.get("source_files", [])
+            retained = [item["path"] for item in source_files
+                        if self.retained_paths.get(os.path.normcase(str(Path(item["path"]).resolve()))) == item["identity"]]
+            candidates = [item for item in source_files if item["path"] not in retained]
+            cleanup = cleanup_merged_sources({**result, "source_files": candidates}, protected)
+            previous = task.get("cleanup_result", {})
+            cleanup["deleted"] = list(dict.fromkeys(previous.get("deleted", []) + cleanup["deleted"]))
+            cleanup["retained"] = list(dict.fromkeys(retained + cleanup["retained"]))
+            task["cleanup_result"] = cleanup
+            deleted = {os.path.normcase(str(Path(path).resolve())) for path in cleanup["deleted"]}
+            for part in self.all_tasks:
+                if part.get("kind") != "merge" and os.path.normcase(str(task_file(part).resolve())) in deleted:
+                    part["source_deleted"] = True
+                    if part.get("widget"):
+                        part["widget"].update_status("已合并，分P已清理")
+            widget = task.get("widget")
+            if cleanup["pending"]:
+                if widget:
+                    widget.update_status("合并完成，部分分P等待其他任务结束后清理")
+                continue
+            self.pending_cleanups.remove(task)
+            task["cleanup_finished_at"] = time.monotonic()
+            if widget:
+                if cleanup["retained"] or cleanup["errors"]:
+                    widget.update_status("合并完成，部分分P已保留（文件变化、占用或其他任务需要）")
+                    widget.setToolTip("\n".join(cleanup["errors"]))
+                else:
+                    widget.update_status("合并完成，分P已清理")
 
     def pause_task(self, task):
         state = task["state"]
@@ -168,8 +228,8 @@ class DownloadWidget(QtWidgets.QWidget):
 
     @staticmethod
     def _remove_partial_files(task):
-        root_dir = QtCore.QDir(task["path"])
-        if not root_dir.cd(task["title"]):
+        root_dir = QtCore.QDir(str(task_directory(task)))
+        if not root_dir.exists():
             task["streamStates"] = {}
             task.pop("resolvedMedia", None)
             return True
@@ -192,7 +252,7 @@ class DownloadWidget(QtWidgets.QWidget):
 
     @staticmethod
     def _task_key(task):
-        path = os.path.join(task["path"], task["title"], task["name"])
+        path = str(task_file(task, suffix=""))
         return os.path.normcase(os.path.abspath(path))
 
     @classmethod
@@ -241,16 +301,52 @@ class DownloadWidget(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def timer_timeout(self):
-        if len(self.running_tasks) >= self.max_thread_count or not self.tasks:
+        self._cleanup_finished_merges()
+        if not self.tasks:
             return
         active_keys = set().union(*(self._task_keys(task) for task in self.running_tasks))
+        # A ready merge has priority and its own worker slot. It must not wait
+        # behind an entire playlist's remaining downloads.
+        merge_running = any(task.get("kind") == "merge" for task in self.running_tasks)
         for index in range(len(self.tasks) - 1, -1, -1):
             task = self.tasks[index]
+            if task.get("kind") != "merge":
+                continue
             dependencies = task.get("dependencies", [])
             if any(part["state"] != "completed" for part in dependencies):
                 failed = any(part["state"] == "failed" for part in dependencies)
                 task["widget"].update_status("等待分P完成（有失败项，请重试）" if failed else "等待所选分P下载完成")
                 continue
-            if not self._task_keys(self.tasks[index]) & active_keys:
+            if not merge_running and not self._task_keys(task) & active_keys:
                 self._start_task(self.tasks.pop(index))
+                active_keys.update(self._task_keys(task))
                 break
+        while sum(task.get("kind") != "merge" for task in self.running_tasks) < max(1, self.max_thread_count):
+            candidate = None
+            for index in range(len(self.tasks) - 1, -1, -1):
+                task = self.tasks[index]
+                if task.get("kind") == "merge" or self._download_is_blocked(task):
+                    continue
+                if not self._task_keys(task) & active_keys:
+                    candidate = index
+                    break
+            if candidate is None:
+                break
+            task = self.tasks.pop(candidate)
+            self._start_task(task)
+            active_keys.update(self._task_keys(task))
+
+    def _download_is_blocked(self, task):
+        if not task.get("batch_id"):
+            return False
+        for earlier in self.all_tasks:
+            if (earlier.get("kind") != "merge" or earlier.get("batch_id") != task["batch_id"]
+                    or earlier.get("video_order", 0) >= task.get("video_order", 0)
+                    or earlier.get("state") in ("completed", "failed", "paused")):
+                continue
+            # Failed/paused videos keep their parts for retry while later
+            # videos can still make progress.
+            if any(part.get("state") in ("failed", "paused") for part in earlier["dependencies"]):
+                continue
+            return True
+        return False

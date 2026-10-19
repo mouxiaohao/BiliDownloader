@@ -35,6 +35,9 @@ class ConfigWidget(QtWidgets.QWidget):
         self.quality_match = {}
         self.ui = Ui_ConfigWidget()
         self.ui.setupUi(self)
+        self.output_summary = QtWidgets.QLabel()
+        self.output_summary.setWordWrap(True)
+        self.layout().insertWidget(0, self.output_summary)
         self.fnval = get_fnval()
         self.data = None
         self.ai_language_title_map = {}
@@ -93,6 +96,8 @@ class ConfigWidget(QtWidgets.QWidget):
                 "specialAudio": special_audio,
                 "aiLanguage": ai_language,
                 "disable_title_limit": disable_title_limit,
+                "output_layout": self.data.get("output_layout", "per_video"),
+                "delete_after_merge": self.data.get("delete_after_merge", True),
             }
         try:
             tasks = build_download_tasks(selected_pages, options, self.data.get("merge_videos", []),
@@ -180,6 +185,9 @@ class ConfigWidget(QtWidgets.QWidget):
         )
         self.ui.combo_codec.setCurrentText(video_codec_id[codec])
         self.data = self.parent().input_pages[2].data
+        layout = "所有视频放在所选文件夹" if self.data.get("output_layout") == "shared" else "每个视频单独文件夹"
+        cleanup = "合并成功后删除参与分P" if self.data.get("delete_after_merge", True) else "合并后保留分P"
+        self.output_summary.setText("存放方式：{}；{}。".format(layout, cleanup))
         self.ui.line_path.setText(
             userdata.get(
                 userdata.CFGS.DOWNLOAD_PATH,  # User

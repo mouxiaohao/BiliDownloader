@@ -3,6 +3,7 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from ui_downloaditem import Ui_DownloadItem
 from utils.open_folder import open_folder
 from utils.sizefstr import sizefStr
+from utils.taskpaths import task_directory
 
 
 class DownloadItem(QtWidgets.QWidget):
@@ -97,9 +98,10 @@ class DownloadItem(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def on_open_button_clicked(self):
-        directory = QtCore.QDir(self.info["path"])
-        directory.cd(self.info["title"])
-        open_folder(directory.absolutePath(), self.info["parent"])
+        directory = task_directory(self.info)
+        if not directory.exists():
+            directory = directory.parent
+        open_folder(str(directory.resolve()), self.info["parent"])
 
     @QtCore.Slot()
     def on_restart_button_clicked(self):

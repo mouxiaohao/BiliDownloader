@@ -14,6 +14,9 @@ def main(arguments):
     parser.add_argument("--url", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--download", action="store_true")
+    parser.add_argument("--folder-layout", choices=("per_video", "shared"), default="per_video")
+    parser.add_argument("--keep-parts", action="store_true")
+    parser.add_argument("--merge-next-video", action="store_true")
     args = parser.parse_args(arguments)
     report_path = Path(args.report).resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -23,6 +26,7 @@ def main(arguments):
     from downloadplan import build_download_tasks
     from utils import configUtils
     from utils.media_merge import find_media_tool, probe_media, run_media_process
+    from utils.taskpaths import task_file
     from utils.version import __version__
     from mainwindow import MainWindow
 
@@ -33,6 +37,8 @@ def main(arguments):
     configUtils.setUserData("version", __version__)
     configUtils.setUserData(configUtils.Configs.AUTO_FILL_DATA_FROM_CLIPBOARD, False)
     configUtils.setUserData(configUtils.Configs.SHOW_DOWNLOAD_TIP, False)
+    configUtils.setUserData(configUtils.Configs.OUTPUT_LAYOUT, args.folder_layout)
+    configUtils.setUserData(configUtils.Configs.DELETE_PARTS_AFTER_MERGE, not args.keep_parts)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     font_path = Path(__file__).resolve().parent / "font" / "HarmonyOS_Sans_SC_Regular.ttf"
     if font_path.exists():
@@ -66,17 +72,26 @@ def main(arguments):
         selection.merge_boxes[first["key"]].setChecked(True)
         second = next((group for group in selection.data["videos"] if group["key"] != first["key"] and group["pages"]), None)
         if second:
-            second["pages"][0]["tree_item"].setCheckState(0, QtCore.Qt.CheckState.Checked)
-        assert selection.data["merge_videos"] == [first["key"]]
+            for page in second["pages"][:2 if args.merge_next_video else 1]:
+                page["tree_item"].setCheckState(0, QtCore.Qt.CheckState.Checked)
+            if args.merge_next_video:
+                assert len(second["pages"]) >= 2
+                selection.merge_boxes[second["key"]].setChecked(True)
+        expected_merges = {first["key"]}
+        if second and args.merge_next_video:
+            expected_merges.add(second["key"])
+        assert set(selection.data["merge_videos"]) == expected_merges
         options = {"path": str(runtime / "downloads"), "quality": 16, "codec": 7,
                    "reserveAudio": False, "fnval": 4048, "specialAudio": None,
-                   "aiLanguage": None, "disable_title_limit": False}
+                   "aiLanguage": None, "disable_title_limit": False,
+                   "output_layout": args.folder_layout, "delete_after_merge": not args.keep_parts}
+        report.update({"folder_layout": args.folder_layout, "delete_after_merge": not args.keep_parts})
         selected = [page for page in selection.data["page_data"] if page["selected"]]
         tasks = build_download_tasks(selected, options, selection.data["merge_videos"], "auto")
         report["planned_tasks"] = [{"kind": task["kind"], "video_key": task["video_key"],
                                     "name": task["name"]} for task in tasks]
         merges = [task for task in tasks if task["kind"] == "merge"]
-        assert len(merges) == 1
+        assert len(merges) == len(expected_merges)
         assert {part["video_key"] for part in merges[0]["dependencies"]} == {first["key"]}
         input_widget.input_pages[0].hide()
         input_widget.ui.gridLayout.removeWidget(input_widget.input_pages[0])
@@ -92,6 +107,7 @@ def main(arguments):
         if args.download:
             Path(options["path"]).mkdir(parents=True, exist_ok=True)
             queue = window.ui.widget_download
+            queue.max_thread_count = 1
             # Exercise the real settings page and Submit handler as well as
             # the download/merge scheduler, rather than injecting queue jobs.
             config = input_widget.input_pages[3]
@@ -119,7 +135,7 @@ def main(arguments):
             config.ui.button_submit.click()
             tasks = list(queue.all_tasks)
             merges = [task for task in tasks if task["kind"] == "merge"]
-            assert len(merges) == 1
+            assert len(merges) == len(expected_merges)
             report["submission_via_config_ui"] = True
             deadline = time.monotonic() + 480
             while any(task["state"] not in ("completed", "failed") for task in tasks):
@@ -131,13 +147,33 @@ def main(arguments):
                     raise TimeoutError("下载与合并验证超时")
                 time.sleep(0.02)
             report["task_results"] = [{"kind": task["kind"], "video_key": task["video_key"],
-                                       "state": task["state"], "name": task["name"]} for task in tasks]
+                                       "state": task["state"], "name": task["name"],
+                                       "started_at": task.get("started_at"), "finished_at": task.get("finished_at"),
+                                       "source_deleted": task.get("source_deleted", False)} for task in tasks]
             report["merge_result"] = merges[0]["merge_result"]
+            report["merge_results"] = [{"video_key": task["video_key"], "result": task["merge_result"],
+                                        "cleanup": task.get("cleanup_result"),
+                                        "cleanup_finished_at": task.get("cleanup_finished_at")} for task in merges]
             media = probe_media(report["merge_result"]["output"])
             report["streams"] = [{key: stream.get(key) for key in ("codec_type", "codec_name", "width", "height", "duration")}
                                  for stream in media["streams"]]
-            run_media_process([find_media_tool("ffmpeg"), "-v", "error", "-nostdin", "-i",
-                               report["merge_result"]["output"], "-f", "null", "-"])
+            for merge in merges:
+                run_media_process([find_media_tool("ffmpeg"), "-v", "error", "-nostdin", "-i",
+                                   merge["merge_result"]["output"], "-f", "null", "-"])
+                for part in merge["dependencies"]:
+                    assert task_file(part).exists() == args.keep_parts
+                if not args.keep_parts:
+                    assert not merge["cleanup_result"]["pending"]
+                    assert not merge["cleanup_result"]["errors"]
+                    assert len(merge["cleanup_result"]["deleted"]) == len(merge["dependencies"])
+            if second:
+                first_merge = next(task for task in merges if task["video_key"] == first["key"])
+                next_start = min(task["started_at"] for task in tasks
+                                 if task["kind"] == "part" and task["video_key"] == second["key"])
+                assert first_merge["finished_at"] <= next_start
+                if not args.keep_parts:
+                    assert first_merge["cleanup_finished_at"] <= next_start
+                report["per_video_pipeline"] = "passed"
             report["full_decode"] = "passed"
         report["ok"] = True
     except Exception:

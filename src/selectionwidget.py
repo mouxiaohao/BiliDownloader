@@ -3,6 +3,7 @@ from collections import OrderedDict
 from types import SimpleNamespace
 
 from PySide6 import QtWidgets, QtCore
+from utils import configUtils
 
 
 class SelectionWidget(QtWidgets.QWidget):
@@ -15,7 +16,7 @@ class SelectionWidget(QtWidgets.QWidget):
         self._building = False
         self.ui = SimpleNamespace()
         layout = QtWidgets.QVBoxLayout(self)
-        hint = QtWidgets.QLabel("勾选列表或视频可选择其全部分P，也可展开后逐P勾选。")
+        hint = QtWidgets.QLabel("勾选列表或视频可选择其全部分P，也可展开后逐P勾选。\n启用合并后按视频依次完成：下载 → 合并 → 按设置清理分P。")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         toolbar = QtWidgets.QHBoxLayout()
@@ -28,7 +29,7 @@ class SelectionWidget(QtWidgets.QWidget):
             if title == "只选当前视频":
                 self.current_button = button
         self.merge_all = QtWidgets.QCheckBox("所选视频均合并分P")
-        self.merge_all.setToolTip("每个视频分别合并；不会把不同视频拼在一起。原分P文件保留。")
+        self.merge_all.setToolTip("每个视频分别合并；不会把不同视频拼在一起。可在下方选择是否删除分P。")
         self.merge_all.toggled.connect(self.set_merge_all)
         toolbar.addWidget(self.merge_all)
         toolbar.addStretch()
@@ -50,12 +51,28 @@ class SelectionWidget(QtWidgets.QWidget):
         options.addWidget(self.merge_mode)
         options.addStretch()
         layout.addLayout(options)
+        storage = QtWidgets.QHBoxLayout()
+        storage.addWidget(QtWidgets.QLabel("存放方式："))
+        self.output_layout = QtWidgets.QComboBox()
+        self.output_layout.addItem("每个视频单独一个文件夹", "per_video")
+        self.output_layout.addItem("所有视频放在同一个所选文件夹", "shared")
+        self.output_layout.setToolTip("统一存放时，文件名包含视频名称和BV号，防止不同视频的同名分P互相覆盖。")
+        self.output_layout.currentIndexChanged.connect(self.update_selection)
+        storage.addWidget(self.output_layout)
+        self.delete_parts = QtWidgets.QCheckBox("合并成功后删除参与合并的分P")
+        self.delete_parts.setChecked(True)
+        self.delete_parts.setToolTip("仅清理参与本次成功合并的分P视频；合并失败或文件发生变化时保留。独立音频和弹幕保留。")
+        self.delete_parts.toggled.connect(self.update_selection)
+        storage.addWidget(self.delete_parts)
+        storage.addStretch()
+        layout.addLayout(storage)
         self.summary = QtWidgets.QLabel()
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
         buttons = QtWidgets.QHBoxLayout()
         self.ui.button_back = QtWidgets.QPushButton("返回")
         self.ui.button_next = QtWidgets.QPushButton("继续")
+        self.ui.button_next.clicked.connect(self.save_output_options)
         buttons.addWidget(self.ui.button_back)
         buttons.addWidget(self.ui.button_next)
         layout.addLayout(buttons)
@@ -81,6 +98,9 @@ class SelectionWidget(QtWidgets.QWidget):
         self.merge_boxes.clear()
         self.data = pickle.loads(self.parent().input_pages[1].meta.data())
         self._normalize_legacy()
+        saved_layout = configUtils.getUserData(configUtils.Configs.OUTPUT_LAYOUT, "per_video")
+        self.output_layout.setCurrentIndex(max(0, self.output_layout.findData(saved_layout)))
+        self.delete_parts.setChecked(configUtils.getUserData(configUtils.Configs.DELETE_PARTS_AFTER_MERGE, True))
         self.merge_all.setChecked(False)
         self.root = QtWidgets.QTreeWidgetItem(self.tree, [str(self.data["title"]), ""])
         self.root.setFlags(self.root.flags() | QtCore.Qt.ItemFlag.ItemIsAutoTristate | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
@@ -105,7 +125,7 @@ class SelectionWidget(QtWidgets.QWidget):
                 page["tree_item"] = part
                 page["video_key"] = group["key"]
             box = QtWidgets.QCheckBox("合并所选分P")
-            box.setToolTip("至少选择2个分P；仅合并当前视频中的所选分P，顺序按P号排列。原分P文件保留。")
+            box.setToolTip("至少选择2个分P；仅合并当前视频中的所选分P，顺序按P号排列。是否删除分P由下方选项决定。")
             box.toggled.connect(self.update_selection)
             self.merge_boxes[group["key"]] = box
             self.tree.setItemWidget(item, 1, box)
@@ -162,5 +182,14 @@ class SelectionWidget(QtWidgets.QWidget):
                     merge_keys.append(group["key"])
         self.data["merge_videos"] = merge_keys
         self.data["merge_mode"] = self.merge_mode.currentData()
+        self.data["output_layout"] = self.output_layout.currentData()
+        self.data["delete_after_merge"] = self.delete_parts.isChecked()
+        self.delete_parts.setEnabled(bool(merge_keys))
         self.summary.setText("已选 {} 个视频 / {} 个分P；{} 个视频将分别合并分P。".format(selected_videos, selected_count, len(merge_keys)))
         self.ui.button_next.setEnabled(selected_count > 0)
+
+    def save_output_options(self):
+        data = configUtils.UserDataHelper()
+        data.set(data.CFGS.OUTPUT_LAYOUT, self.output_layout.currentData())
+        data.set(data.CFGS.DELETE_PARTS_AFTER_MERGE, self.delete_parts.isChecked())
+        data.save()

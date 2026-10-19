@@ -8,7 +8,7 @@ from dialogdownloadupdate import DialogDownloadUpdate
 from dialogupdateinfo import DialogUpdateInfo
 from ui_mainwindow import Ui_MainWindow
 from update import UpdateChecker, UpdateDownloader
-from utils import init, configUtils
+from utils import init, configUtils, version
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -21,7 +21,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        self.setWindowTitle("BiliDownloader 1.5.0 · 播放列表与分P")
+        self.setWindowTitle("BiliDownloader {} · 播放列表与分P".format(version.__version__))
         self.setMinimumSize(950, 650)
 
         tab_names = ["输入", "下载", "设置", "关于"]
